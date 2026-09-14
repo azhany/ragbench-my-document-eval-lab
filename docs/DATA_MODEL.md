@@ -1,27 +1,58 @@
 # Data Model
 
+Schema state is versioned under `db/migrations/` and applied with
+`scripts/migrate.sh`; applied versions are tracked in `schema_migrations`
+(created by the runner). The Go API verifies the schema version at startup and
+on `/readyz` but never creates or alters schema itself.
+
 ## Core tables
 
 ### documents
-- id UUID PK
+- id UUID PK (default `gen_random_uuid()`)
 - filename
 - mime_type
 - storage_path
-- status
-- checksum
-- chunk_count
+- status: `queued` | `processing` | `processed` | `failed`, default `queued`
+- checksum: SHA-256 of the uploaded bytes, unique — the same bytes are the same document
+- chunk_count: published chunk count, NULL until a revision is indexed
 - created_at
 - updated_at
 
+### index_revisions
+One revision per (document, chunk settings, embedding profile) combination.
+Chunk-size or embedding changes create a new revision instead of overwriting
+evidence referenced by historical traces and evaluations.
+
+- id UUID PK
+- document_id FK → documents ON DELETE CASCADE
+- revision_number: per-document monotonic, ≥ 1; unique with document_id
+- source_checksum: checksum of the source bytes this revision was built from
+- chunk_size (> 0), chunk_overlap (≥ 0)
+- embedding_provider, embedding_model, embedding_dimensions (> 0): embedding
+  compatibility identity; retrieval never mixes incompatible revisions
+- status: `pending` | `ready` | `failed`, default `pending`
+- error_code: set when `failed`
+- created_at, published_at (set when `ready`)
+- State check: `ready` ⇒ published_at set and no error; `failed` ⇒ error_code
+  set; `pending` ⇒ neither.
+
 ### doc_chunks
 - id UUID PK
-- document_id FK
-- chunk_index
-- content
+- index_revision_id FK → index_revisions ON DELETE CASCADE
+- document_id FK → documents ON DELETE CASCADE; composite FK
+  (index_revision_id, document_id) → index_revisions(id, document_id) keeps
+  chunk document ownership consistent with its revision
+- chunk_index: ≥ 0, unique with index_revision_id
+- content: non-empty
 - metadata JSONB
-- content_tsv TSVECTOR
-- embedding VECTOR
+- content_tsv TSVECTOR: generated (`to_tsvector('simple', content)`), GIN-indexed
+- embedding VECTOR(1536): NULL until embedded; dimension pinned by migration
+  `0003_doc_chunks.sql` — changing it requires a new migration that alters the
+  column, rebuilds the HNSW index, and creates new index revisions
 - created_at
+
+Retrieval indexes: HNSW on `embedding vector_cosine_ops`, GIN on
+`content_tsv`, btree on `document_id`.
 
 ### rag_configs
 - id UUID PK

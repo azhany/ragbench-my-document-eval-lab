@@ -17,6 +17,7 @@ import (
 	"ragbench-my/backend/internal/config"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
+	"ragbench-my/backend/internal/schema"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -51,6 +52,9 @@ func run(logger *slog.Logger) error {
 
 	handler := httpapi.New(logger,
 		health.NamedCheck{Name: "database", Check: pool.Ping},
+		health.NamedCheck{Name: "schema", Check: func(ctx context.Context) error {
+			return schema.Check(ctx, pool)
+		}},
 	)
 
 	listener, err := net.Listen("tcp", cfg.Addr)
@@ -107,4 +111,21 @@ func logDatabaseState(ctx context.Context, logger *slog.Logger, pool *pgxpool.Po
 		return
 	}
 	logger.Info("application database reachable", slog.String("dependency", "postgres"))
+
+	// Surface schema state at startup without creating or altering anything:
+	// migrations are applied out of band via scripts/migrate.sh.
+	schemaCtx, schemaCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer schemaCancel()
+	if err := schema.Check(schemaCtx, pool); err != nil {
+		logger.Warn("application schema is not ready for this binary",
+			slog.String("dependency", "postgres"),
+			slog.String("error", err.Error()),
+			slog.String("impact", "/readyz reports the schema check as failed until migrations are applied"),
+			slog.String("remediation", "run sh scripts/migrate.sh"),
+		)
+		return
+	}
+	logger.Info("application schema at expected migration version",
+		slog.Int("required_version", schema.RequiredVersion),
+	)
 }

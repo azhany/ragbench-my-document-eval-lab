@@ -117,4 +117,23 @@ These are local development credentials only. Change them via `.env` before expo
 - Airflow components only start after `airflow-init` completes; a failed migration or user creation stops the init container and blocks the Airflow services with a visible error.
 - If the application database is unavailable, the API still starts and serves `200` on `/healthz`, while `/readyz` returns `503` with the failing check (see `docs/API.md`).
 - On failure, inspect the named service first: `docker compose logs <service>`. Startup errors in the API log identify the failed dependency (for example, the `postgres` dependency in the startup warning).
-- Note: the application schema and migrations are not implemented yet (RB-02). The stack currently boots without any application tables.
+### Database migrations
+
+Application schema changes are numbered SQL migrations under `db/migrations/`,
+applied with the shell entry point (PostgreSQL is the source of truth; the API
+never creates schema on its own):
+
+```sh
+sh scripts/migrate.sh          # apply pending migrations
+sh scripts/migrate.sh status   # list applied/pending migrations
+```
+
+The runner is idempotent — applied migrations recorded in `schema_migrations`
+are skipped — and each migration commits atomically with its bookkeeping
+record, so a failed migration leaves no partial state and exits non-zero with
+the failing file named. Conventions live in `db/migrations/README.md`.
+
+The API verifies the schema version at startup and on `/readyz` (the `schema`
+check): against an unmigrated or mismatched database, `/readyz` returns `503`
+until `scripts/migrate.sh` has been run. See `docs/API.md` for the readiness
+response shape.

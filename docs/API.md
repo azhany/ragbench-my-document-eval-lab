@@ -31,6 +31,9 @@ Response `200 OK` when all checks pass:
   "checks": {
     "database": {
       "status": "ok"
+    },
+    "schema": {
+      "status": "ok"
     }
   }
 }
@@ -57,8 +60,7 @@ Current check set:
 | Check | Meaning |
 |---|---|
 | `database` | Ping of the application PostgreSQL connection pool |
-
-Note: no application schema or migrations exist yet (they arrive with RB-02). Until then `readyz` verifies database connectivity only; a schema-state check will be added to the same response contract when migrations are implemented.
+| `schema` | Application schema is migrated to the version this binary expects (`schema_migrations` present at `backend/internal/schema` `RequiredVersion`); fails against an unmigrated or mismatched database |
 
 ### `GET /`
 
