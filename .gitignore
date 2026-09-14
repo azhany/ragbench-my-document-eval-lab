@@ -1,0 +1,12 @@
+# Local environment files hold provider keys and local overrides; never commit them.
+.env
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+frontend/dist/
+
+# Go
+backend/out/

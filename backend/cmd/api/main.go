@@ -1,7 +1,110 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"ragbench-my/backend/internal/config"
+	"ragbench-my/backend/internal/health"
+	"ragbench-my/backend/internal/httpapi"
+)
+
+const shutdownTimeout = 10 * time.Second
 
 func main() {
-	fmt.Println("RAGbench-MY Document Library Eval Lab API")
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	if err := run(logger); err != nil {
+		logger.Error("api server exited with failure", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("api server stopped")
+}
+
+func run(logger *slog.Logger) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("set up database pool from DATABASE_URL (check the postgres service is healthy and credentials match): %w", err)
+	}
+	defer pool.Close()
+
+	logDatabaseState(ctx, logger, pool)
+
+	handler := httpapi.New(logger,
+		health.NamedCheck{Name: "database", Check: pool.Ping},
+	)
+
+	listener, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s (is the port already in use?): %w", cfg.Addr, err)
+	}
+
+	server := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+		}
+	}()
+
+	logger.Info("api server listening",
+		slog.String("addr", cfg.Addr),
+		slog.String("service", httpapi.ServiceName),
+	)
+
+	select {
+	case err := <-serveErr:
+		return fmt.Errorf("http server failed: %w", err)
+	case <-ctx.Done():
+		logger.Info("shutdown signal received, draining in-flight requests")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("graceful shutdown within %s: %w", shutdownTimeout, err)
+	}
+	return nil
+}
+
+func logDatabaseState(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool) {
+	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	if err := pool.Ping(pingCtx); err != nil {
+		logger.Warn("application database not reachable at startup",
+			slog.String("dependency", "postgres"),
+			slog.String("error", err.Error()),
+			slog.String("impact", "/readyz returns 503 until the database recovers"),
+		)
+		return
+	}
+	logger.Info("application database reachable", slog.String("dependency", "postgres"))
 }

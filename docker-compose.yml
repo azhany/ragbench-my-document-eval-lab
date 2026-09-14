@@ -1,37 +1,184 @@
+name: ragbench-my
+
+# Local development stack for the RAGbench-MY PoC.
+#
+# Databases:
+#   - postgres            : application database (pgvector), owned by the Go API.
+#   - airflow-metadata-db : Airflow metadata database, a separate Postgres service
+#                           so Airflow state is never stored in the application
+#                           database.
+#
+# Airflow runs apache/airflow:3.0.6 with LocalExecutor (no Redis/Celery):
+#   - airflow-init migrates the metadata database and creates the local admin user.
+#   - airflow-apiserver serves the Airflow UI and REST API.
+#   - airflow-dag-processor parses and serializes DAGs from ./airflow/dags.
+#   - airflow-scheduler schedules and executes tasks.
+#
+# Service startup failures are visible through healthchecks, the
+# service_completed_successfully gate on airflow-init, and container logs.
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:3.0.6
+  user: "50000:0"
+  env_file:
+    - path: .env
+      required: false
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__API__WORKERS: "1"
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-ragbench-airflow-local-api-secret-change-me}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-ragbench-airflow-local-jwt-secret-change-me}
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-metadata-db:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - airflow_logs:/opt/airflow/logs
+    # Shared document bytes: written by the API, consumed by Airflow DAGs.
+    - document_uploads:/data/uploads
+  depends_on: &airflow-common-depends-on
+    airflow-metadata-db:
+      condition: service_healthy
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: ragbench
-      POSTGRES_USER: ragbench
-      POSTGRES_PASSWORD: ragbench
+      POSTGRES_USER: ${POSTGRES_USER:-ragbench}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragbench}
+      POSTGRES_DB: ${POSTGRES_DB:-ragbench}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-ragbench}", "-d", "${POSTGRES_DB:-ragbench}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   backend:
     build: ./backend
+    env_file:
+      - path: .env
+        required: false
     environment:
-      DATABASE_URL: postgres://ragbench:ragbench@postgres:5432/ragbench?sslmode=disable
-    depends_on:
-      - postgres
+      RAGBENCH_API_ADDR: ":8080"
+      DATABASE_URL: ${DATABASE_URL:-postgres://ragbench:ragbench@postgres:5432/ragbench?sslmode=disable}
     ports:
-      - "8080:8080"
+      - "${RAGBENCH_API_PORT:-8080}:8080"
+    volumes:
+      - document_uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build: ./frontend
-    depends_on:
-      - backend
     ports:
-      - "5173:5173"
-
-  airflow:
-    # Intentionally left as a project integration point.
-    # Use the official Airflow Docker Compose pattern when implementation begins.
-    image: apache/airflow:3.0.6
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
-      - postgres
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  airflow-metadata-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_metadata_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow", "-d", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  airflow-init:
+    <<: *airflow-common
+    user: "0:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -euo pipefail
+        mkdir -p /opt/airflow/logs /data/uploads
+        chown -R 50000:0 /opt/airflow/logs /data/uploads
+        echo "[airflow-init] prepared shared runtime volumes for UID 50000."
+        echo "[airflow-init] delegating to the Airflow image entrypoint for metadata database migrations and admin user provisioning..."
+        exec /entrypoint airflow version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "${AIRFLOW_UI_PORT:-9090}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      interval: 90s
+      timeout: 60s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
+  airflow_metadata_data:
+  airflow_logs:
+  document_uploads:
