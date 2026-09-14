@@ -10,4 +10,7 @@ export default defineConfig({
       '/readyz': 'http://localhost:8080',
     },
   },
+  test: {
+    environment: 'happy-dom',
+  },
 })

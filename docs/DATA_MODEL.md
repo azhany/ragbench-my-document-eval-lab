@@ -55,15 +55,23 @@ Retrieval indexes: HNSW on `embedding vector_cosine_ops`, GIN on
 `content_tsv`, btree on `document_id`.
 
 ### rag_configs
+Immutable saved configurations: no update or delete — changing settings
+creates a new configuration identity under a new name (migration
+`0004_rag_configs.sql`).
+
 - id UUID PK
-- name
-- chunk_size
-- chunk_overlap
-- retrieval_mode
-- top_k
+- name: unique, 1–200 characters
+- chunk_size: 1–8192
+- chunk_overlap: ≥ 0 and strictly smaller than chunk_size
+- retrieval_mode: `vector` | `hybrid`
+- top_k: 1–100
 - rerank_enabled
-- prompt_version
-- model_profile
+- prompt_version: registry-governed (`backend/internal/providers`, currently `v1`)
+- model_profile: registry-governed (currently `openai-gpt-4o-mini`)
+- embedding_profile: registry-governed key (currently `openai-text-embedding-3-small`)
+- embedding_provider, embedding_model, embedding_dimensions: resolved identity
+  persisted at creation so the exact embedding identity survives registry
+  changes; must stay compatible with `index_revisions`
 - created_at
 
 ### eval_datasets

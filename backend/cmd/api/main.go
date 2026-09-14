@@ -17,6 +17,7 @@ import (
 	"ragbench-my/backend/internal/config"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
+	"ragbench-my/backend/internal/ragconfig"
 	"ragbench-my/backend/internal/schema"
 )
 
@@ -51,6 +52,7 @@ func run(logger *slog.Logger) error {
 	logDatabaseState(ctx, logger, pool)
 
 	handler := httpapi.New(logger,
+		ragconfig.NewStore(pool),
 		health.NamedCheck{Name: "database", Check: pool.Ping},
 		health.NamedCheck{Name: "schema", Check: func(ctx context.Context) error {
 			return schema.Check(ctx, pool)

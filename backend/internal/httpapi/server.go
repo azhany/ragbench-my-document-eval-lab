@@ -11,12 +11,22 @@ import (
 
 const ServiceName = "ragbench-api"
 
-func New(logger *slog.Logger, readinessChecks ...health.NamedCheck) http.Handler {
+// server carries the dependencies shared by API handlers.
+type server struct {
+	logger  *slog.Logger
+	configs ConfigStore
+}
+
+func New(logger *slog.Logger, configs ConfigStore, readinessChecks ...health.NamedCheck) http.Handler {
+	s := &server{logger: logger, configs: configs}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", rootHandler)
 	mux.HandleFunc("GET /healthz", health.LivenessHandler(ServiceName))
 	mux.Handle("GET /readyz", health.ReadinessHandler(logger, readinessChecks...))
+	mux.HandleFunc("POST /api/v1/rag-configs", s.createConfig)
+	mux.HandleFunc("GET /api/v1/rag-configs", s.listConfigs)
+	mux.HandleFunc("GET /api/v1/rag-configs/{id}", s.getConfig)
 
 	return logMiddleware(logger, mux)
 }
@@ -30,8 +40,8 @@ type serviceInfo struct {
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, serviceInfo{
 		Service:   ServiceName,
-		Status:     "ok",
-		Resources: []string{"/healthz", "/readyz"},
+		Status:    "ok",
+		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs"},
 	})
 }
 
