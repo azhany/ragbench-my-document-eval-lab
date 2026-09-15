@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ragbench-my/backend/internal/config"
+	"ragbench-my/backend/internal/documents"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
 	"ragbench-my/backend/internal/ragconfig"
@@ -51,8 +52,12 @@ func run(logger *slog.Logger) error {
 
 	logDatabaseState(ctx, logger, pool)
 
-	handler := httpapi.New(logger,
+	if err := os.MkdirAll(cfg.UploadDir, 0750); err != nil {
+		return fmt.Errorf("prepare upload directory: %w", err)
+	}
+	handler := httpapi.NewDocumentAPI(logger,
 		ragconfig.NewStore(pool),
+		httpapi.DocumentOptions{Store: documents.NewStore(pool), Dispatcher: documents.NewAirflow(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword), UploadDir: cfg.UploadDir, MaxBytes: cfg.MaxUploadBytes},
 		health.NamedCheck{Name: "database", Check: pool.Ping},
 		health.NamedCheck{Name: "schema", Check: func(ctx context.Context) error {
 			return schema.Check(ctx, pool)

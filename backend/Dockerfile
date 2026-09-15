@@ -10,7 +10,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/ragbench-api ./cmd/api
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && adduser -D -u 10001 appuser
+RUN apk add --no-cache ca-certificates && adduser -D -u 10001 -G root appuser
 USER appuser
 
 COPY --from=build /out/ragbench-api /usr/local/bin/ragbench-api

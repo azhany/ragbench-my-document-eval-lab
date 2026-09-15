@@ -37,6 +37,6 @@ describe('router', () => {
     expect(chatComponent).not.toBe(overviewComponent)
 
     await router.push('/library')
-    expect(router.currentRoute.value.matched[0].components.default).toBe(chatComponent)
+    expect(router.currentRoute.value.matched[0].components.default).not.toBe(chatComponent)
   })
 })

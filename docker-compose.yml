@@ -18,7 +18,8 @@ name: ragbench-my
 # service_completed_successfully gate on airflow-init, and container logs.
 
 x-airflow-common: &airflow-common
-  image: apache/airflow:3.0.6
+  image: ragbench-my-airflow:3.0.6
+  build: ./airflow
   user: "50000:0"
   env_file:
     - path: .env
@@ -34,6 +35,11 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    DATABASE_URL: ${DATABASE_URL:-postgres://ragbench:ragbench@postgres:5432/ragbench?sslmode=disable}
+    UPLOAD_DIR: /data/uploads
+    MAX_EXTRACTED_CHARS: ${MAX_EXTRACTED_CHARS:-2000000}
+    MAX_DOCX_EXPANDED_BYTES: ${MAX_DOCX_EXPANDED_BYTES:-104857600}
+    EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-16}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - airflow_logs:/opt/airflow/logs
@@ -69,6 +75,11 @@ services:
     environment:
       RAGBENCH_API_ADDR: ":8080"
       DATABASE_URL: ${DATABASE_URL:-postgres://ragbench:ragbench@postgres:5432/ragbench?sslmode=disable}
+      UPLOAD_DIR: /data/uploads
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      AIRFLOW_API_URL: http://airflow-apiserver:8080
+      AIRFLOW_API_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      AIRFLOW_API_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
     ports:
       - "${RAGBENCH_API_PORT:-8080}:8080"
     volumes:
@@ -76,6 +87,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/healthz || exit 1"]
       interval: 10s
@@ -122,6 +135,7 @@ services:
         set -euo pipefail
         mkdir -p /opt/airflow/logs /data/uploads
         chown -R 50000:0 /opt/airflow/logs /data/uploads
+        chmod 2770 /data/uploads
         echo "[airflow-init] prepared shared runtime volumes for UID 50000."
         echo "[airflow-init] delegating to the Airflow image entrypoint for metadata database migrations and admin user provisioning..."
         exec /entrypoint airflow version

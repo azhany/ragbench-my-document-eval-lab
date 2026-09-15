@@ -22,7 +22,7 @@ function httpError(status, body) {
   let message =
     envelope?.message ??
     `API returned HTTP ${status} without a structured error body.`
-  if (status >= 502) {
+  if (status >= 502 && !envelope) {
     message +=
       ' The API is unreachable behind the proxy — check that the backend container is running (docker compose ps backend) and retry.'
   }
@@ -39,8 +39,12 @@ function httpError(status, body) {
 async function request(path, { method = 'GET', body } = {}) {
   const options = { method, headers: {} }
   if (body !== undefined) {
-    options.headers['Content-Type'] = 'application/json'
-    options.body = JSON.stringify(body)
+    if (body instanceof FormData) {
+      options.body = body
+    } else {
+      options.headers['Content-Type'] = 'application/json'
+      options.body = JSON.stringify(body)
+    }
   }
 
   let response
@@ -68,4 +72,5 @@ async function request(path, { method = 'GET', body } = {}) {
 export const api = {
   get: (path) => request(path),
   post: (path, body) => request(path, { method: 'POST', body }),
+  delete: (path) => request(path, { method: 'DELETE' }),
 }

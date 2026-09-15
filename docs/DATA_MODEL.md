@@ -13,13 +13,17 @@ on `/readyz` but never creates or alters schema itself.
 - mime_type
 - storage_path
 - status: `queued` | `processing` | `processed` | `failed`, default `queued`
-- checksum: SHA-256 of the uploaded bytes, unique — the same bytes are the same document
+- checksum: SHA-256 of the uploaded bytes, unique among non-deleted documents
 - chunk_count: published chunk count, NULL until a revision is indexed
 - created_at
 - updated_at
+- size_bytes: uploaded byte count
+- deleted_at: tombstone; excludes the document from Library and new retrieval
+- latest_revision_id: most recent attempt, used to fence stale tasks
+- active_revision_id: last successfully indexed revision; composite FK enforces document ownership
 
 ### index_revisions
-One revision per (document, chunk settings, embedding profile) combination.
+Each upload/reprocess appends a new revision, including reprocess with identical settings.
 Chunk-size or embedding changes create a new revision instead of overwriting
 evidence referenced by historical traces and evaluations.
 
@@ -27,6 +31,8 @@ evidence referenced by historical traces and evaluations.
 - document_id FK → documents ON DELETE CASCADE
 - revision_number: per-document monotonic, ≥ 1; unique with document_id
 - source_checksum: checksum of the source bytes this revision was built from
+- config_id: saved immutable RAG configuration identity, copied into the revision
+- chunk_unit: `unicode_characters` (NFC text, collapsed whitespace, newline between source blocks)
 - chunk_size (> 0), chunk_overlap (≥ 0)
 - embedding_provider, embedding_model, embedding_dimensions (> 0): embedding
   compatibility identity; retrieval never mixes incompatible revisions
@@ -35,6 +41,7 @@ evidence referenced by historical traces and evaluations.
 - created_at, published_at (set when `ready`)
 - State check: `ready` ⇒ published_at set and no error; `failed` ⇒ error_code
   set; `pending` ⇒ neither.
+- At most one pending revision per document. A publication trigger rejects zero chunks or missing/wrong-dimension vectors.
 
 ### doc_chunks
 - id UUID PK
@@ -53,6 +60,40 @@ evidence referenced by historical traces and evaluations.
 
 Retrieval indexes: HNSW on `embedding vector_cosine_ops`, GIN on
 `content_tsv`, btree on `document_id`.
+
+Migration 0005 removes the erroneous RB-02 unique `(index_revision_id, document_id)`
+chunk constraint: multiple ordered chunks must belong to one revision. The
+composite ownership FK and unique `(index_revision_id, chunk_index)` remain.
+Chunk UUIDs are UUIDv5(revision UUID, decimal chunk index). Metadata retains
+normalized character start/end offsets and all intersecting source page,
+paragraph/heading/table-row locations. Offsets are half-open, relative to the
+normalized text; they are not PDF pixel positions or DOCX page numbers.
+
+`searchable_chunks(config_id)` is the retrieval boundary for RB-09/RB-17. It
+returns only live documents' active ready revisions with non-null vectors and
+provider/model/dimensions matching the saved configuration. Direct evidence
+lookup by chunk ID is separate and may read retained non-active/deleted sources.
+
+### ingestion_jobs
+
+One durable job per revision, with a unique deterministic Airflow run ID:
+
+- id, index_revision_id (unique FK), dag_id, run_id (unique)
+- state: dispatch_pending, dispatch_failed, queued, processing, succeeded, failed, cancelled
+- stage, error_code, error_message, dispatch_attempts
+- created_at, updated_at, dispatched_at, started_at, finished_at
+- stage_metrics JSONB: duration/status per stage; embedding batch size, chunk count,
+  and actual provider prompt tokens (null if unavailable)
+- artifacts JSONB: internal extracted/normalized/chunk handoff, cleared on successful
+  publication. Never exposed through the document API or XCom.
+
+Workers serialize the same job using a PostgreSQL advisory lock. All state
+writes lock the owning document and verify that it is live and this job still
+owns the latest revision. Provider calls execute outside that row lock so
+delete can commit immediately; later provider output is then discarded.
+New revision publication, active-pointer switch, count, and job success commit
+together. Failed replacement leaves the active pointer and count unchanged.
+Tombstoning retains all source/chunk/config evidence indefinitely in this PoC.
 
 ### rag_configs
 Immutable saved configurations: no update or delete — changing settings

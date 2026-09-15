@@ -91,7 +91,7 @@ AIRFLOW__API__SECRET_KEY=ragbench-airflow-local-api-secret-change-me
 AIRFLOW__API_AUTH__JWT_SECRET=ragbench-airflow-local-jwt-secret-change-me
 
 
-# ---- provider keys (leave uncommitted; required only by later stories) ----
+# ---- provider keys (leave uncommitted; required for document embeddings) ----
 # OPENAI_API_KEY=
 # EMBEDDING_PROVIDER_API_KEY=
 ```
@@ -99,7 +99,8 @@ AIRFLOW__API_AUTH__JWT_SECRET=ragbench-airflow-local-jwt-secret-change-me
 Notes:
 
 - If you override the application database credentials, set `DATABASE_URL` to match.
-- Provider API keys belong only in `.env`, which is git-ignored; they are not needed for this foundation stack.
+- Provider API keys belong only in `.env`, which is git-ignored. Upload/extraction
+  run without a key; embedding reports `embedding_failed` until one is configured.
 
 ### Local development credentials
 
@@ -137,3 +138,30 @@ The API verifies the schema version at startup and on `/readyz` (the `schema`
 check): against an unmigrated or mismatched database, `/readyz` returns `503`
 until `scripts/migrate.sh` has been run. See `docs/API.md` for the readiness
 response shape.
+
+### Document Library (Sprint 2)
+
+Run `sh scripts/migrate.sh` after starting PostgreSQL, then rebuild with
+`docker compose up -d --build`. Open http://localhost:5173/library. Save a RAG
+configuration using the documented `POST /api/v1/rag-configs` contract first.
+Select it in Library and upload a text-bearing PDF, DOCX, or UTF-8 TXT.
+Library refreshes every five seconds while documents are listed and exposes the actual error, published chunk count,
+revision history, reprocessing, dispatch recovery, and deletion.
+
+Set `OPENAI_API_KEY` (or `EMBEDDING_PROVIDER_API_KEY`) in `.env`, then recreate
+the Airflow services to enable embeddings. Go dispatches through Airflow 3's
+JWT/v2 API using the existing local admin credentials; keys never reach Vue.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `MAX_UPLOAD_BYTES` | 20971520 | Maximum source file bytes, 1–1073741824 |
+| `MAX_EXTRACTED_CHARS` | 2000000 | Extraction output guard |
+| `MAX_DOCX_EXPANDED_BYTES` | 104857600 | Expanded DOCX archive guard |
+| `EMBEDDING_BATCH_SIZE` | 16 | Embedding request batch, 1–128 chunks |
+| `UPLOAD_DIR` | `/data/uploads` | Same shared path in Go and Airflow |
+
+The upload volume uses shared group 0 and setgid directory permissions; Go
+remains UID 10001 and Airflow UID 50000. Backend startup waits for volume setup.
+Deletion retains historical evidence and excludes the document from new
+searches; it does not erase bytes. Failure and recovery contracts are in
+`docs/API.md`, and verification commands/remaining gates are in `docs/TEST_PLAN.md`.

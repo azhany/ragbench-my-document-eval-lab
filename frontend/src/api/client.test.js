@@ -6,6 +6,22 @@ afterEach(() => {
 })
 
 describe('api client', () => {
+  it('lets the browser set multipart boundaries and preserves dispatch errors', async () => {
+    const body = new FormData()
+    body.append('config_id', 'cfg')
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { code: 'dispatch_failed', message: 'Airflow unavailable' }, document: { id: 'doc' } }), { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(api.post('/api/v1/documents', body)).rejects.toMatchObject({
+      code: 'dispatch_failed', message: 'Airflow unavailable', payload: { document: { id: 'doc' } },
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/documents', { method: 'POST', headers: {}, body })
+  })
+
+  it('handles a successful deletion without a JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+    expect(await api.delete('/api/v1/documents/doc')).toBeNull()
+  })
+
   it('returns parsed JSON on success', async () => {
     vi.stubGlobal(
       'fetch',

@@ -5,18 +5,33 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Addr        string
-	DatabaseURL string
+	Addr            string
+	DatabaseURL     string
+	UploadDir       string
+	MaxUploadBytes  int64
+	AirflowURL      string
+	AirflowUsername string
+	AirflowPassword string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:        envOr("RAGBENCH_API_ADDR", ":8080"),
-		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		Addr:            envOr("RAGBENCH_API_ADDR", ":8080"),
+		DatabaseURL:     strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		UploadDir:       envOr("UPLOAD_DIR", "/data/uploads"),
+		AirflowURL:      envOr("AIRFLOW_API_URL", "http://airflow-apiserver:8080"),
+		AirflowUsername: envOr("AIRFLOW_API_USERNAME", "airflow"),
+		AirflowPassword: envOr("AIRFLOW_API_PASSWORD", "airflow"),
+	}
+	var err error
+	cfg.MaxUploadBytes, err = strconv.ParseInt(envOr("MAX_UPLOAD_BYTES", "20971520"), 10, 64)
+	if err != nil || cfg.MaxUploadBytes <= 0 || cfg.MaxUploadBytes > 1<<30 {
+		return Config{}, errors.New("MAX_UPLOAD_BYTES must be between 1 and 1073741824")
 	}
 
 	if cfg.DatabaseURL == "" {

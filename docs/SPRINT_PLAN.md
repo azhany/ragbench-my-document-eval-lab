@@ -1,10 +1,14 @@
 # Sprint Plan and Implementation Stories
 
-Status: draft backlog, not implemented functionality. Prepared from the current repository documentation.
+Status: implementation in progress. Story files record current completion and outstanding verification gates.
 
 ## 1. Baseline and planning assumptions
 
-The repository currently contains design documents, a Go entry point that prints a banner, and partial Compose configuration. It has no working API, Vue application, SQL migrations, or Airflow DAGs. All stories below start as **Not started**; documentation and directory scaffolding do not count as completed implementation.
+The original planning baseline was design documents, a banner-only Go entry point,
+and partial Compose configuration. Sprint 1 has since delivered the foundation.
+Sprint 2 implementation and verification are recorded in
+[SPRINT_2_VERIFICATION.md](SPRINT_2_VERIFICATION.md); the real-provider and browser
+exit gates remain open. Documentation/scaffolding alone never count as completion.
 
 Proposed cadence: six two-week iterations. This is a sequencing proposal, not a twelve-week delivery commitment: team capacity, provider access, and actual velocity are unknown. At sprint planning, select a dependency-complete subset that fits capacity; split large stories along their acceptance criteria rather than declaring partial features done.
 
@@ -47,7 +51,7 @@ These are **proposals or unresolved contract details**, not requirements already
 | Provider and embeddings | Select one accessible embedding/generation provider; pin embedding model, dimensions, model profile, and tokenizer/chunk unit. Store identifiers, not credentials, with runs. Unknown profiles fail explicitly. | Sprint 1 / backend + pipeline |
 | Document storage and extraction | Local shared Docker volume for uploaded bytes, PostgreSQL for metadata. Text-bearing PDF, DOCX, TXT are supported. Image-only/encrypted/unreadable files produce a visible extraction failure; OCR is not currently specified. Document accepted encodings and upload-size limit. | Sprint 1 / backend + pipeline |
 | Index reproducibility | Introduce an index revision associated with document checksum, chunk settings, embedding profile, and chunk IDs. Query/evaluation pins a compatible ready revision. Chunk-size changes create a revision, not an in-place overwrite of evidence used by old runs. | Sprint 1 / backend + database |
-| Historical evidence and deletion | Remove deleted documents from future retrieval and remove source bytes. Retain the minimal evidence snapshots needed by existing traces/evaluations; explain this retention behavior in the UI/API. Reprocessing must not break historical citations. | Sprint 2 / backend |
+| Historical evidence and deletion | Adopted for this PoC: tombstone to exclude new retrieval, cancel unfinished work, and retain source bytes/chunks/revisions/configuration indefinitely for historical evidence. A source-erasure/snapshot-compaction policy is deferred until trace retention exists (RB-11); deletion is explicitly not an erasure API. See API/data-model contracts. | Sprint 2 / backend |
 | Work dispatch and state | Go triggers Airflow through its supported API. Persist job/run IDs and states; failed dispatch cannot look like successful processing. Define allowed transitions and retry/idempotency behavior, without adding a separate message broker. | Sprint 1 / backend + pipeline |
 | Missing API contracts | Add health/readiness, config and dataset management, experiment dispatch, and retrieved-context contracts. Proposed resource roots: `/api/v1/rag-configs`, `/api/v1/eval-datasets`, `/api/v1/experiments`. Existing routes in API.md retain their names. | Owning sprint / backend |
 | Evaluation semantics | Pin dataset version, corpus/index revisions, relevance granularity, scoring K, evaluator version, rubric, and aggregation rules. Compare chunk-size variants with stable document/source evidence or explicit relevance remapping, never stale chunk IDs. | Sprint 4 / evaluation |

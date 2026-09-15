@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import OverviewView from './views/OverviewView.vue'
 import ComingSoonView from './views/ComingSoonView.vue'
+import LibraryView from './views/LibraryView.vue'
 
 // Destinations whose owning stories have not landed yet route to
 // ComingSoonView, which states the owning stories explicitly and renders no
@@ -15,7 +16,7 @@ const routes = [
   {
     path: '/library',
     name: 'library',
-    component: ComingSoonView,
+    component: LibraryView,
     meta: { title: 'Library', story: 'RB-05–RB-08 (Sprint 2)' },
   },
   {

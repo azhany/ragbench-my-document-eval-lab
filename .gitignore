@@ -10,3 +10,8 @@ frontend/dist/
 
 # Go
 backend/out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
