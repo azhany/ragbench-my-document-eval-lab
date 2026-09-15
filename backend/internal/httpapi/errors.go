@@ -20,6 +20,9 @@ type errorPayload struct {
 	Code    string              `json:"code"`
 	Message string              `json:"message"`
 	Fields  []fieldErrorPayload `json:"fields,omitempty"`
+	// TraceID correlates chat/evaluation errors to the persisted trace
+	// that recorded the failed request; empty for pre-execution rejections.
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 type errorEnvelope struct {
@@ -27,9 +30,15 @@ type errorEnvelope struct {
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string, fields []fieldErrorPayload) {
+	writeTraceError(w, status, code, message, fields, "")
+}
+
+// writeTraceError is writeError with an optional correlated trace id.
+func writeTraceError(w http.ResponseWriter, status int, code, message string, fields []fieldErrorPayload, traceID string) {
 	writeJSON(w, status, errorEnvelope{Error: errorPayload{
 		Code:    code,
 		Message: message,
 		Fields:  fields,
+		TraceID: traceID,
 	}})
 }

@@ -150,23 +150,52 @@ creates a new configuration identity under a new name (migration
 - created_at
 
 ### rag_traces
-- id UUID PK
-- trace_id
-- request_type
-- question
-- rag_config_id
-- success
-- error_code nullable
-- total_latency_ms
-- input_tokens
-- output_tokens
-- estimated_cost
-- created_at
+Migration `0007_rag_traces.sql` creates both tables and indexes their
+creation/trace lookup paths.
+One durable row is written for every chat request after configuration and
+capability validation. A trace write and all spans commit in one transaction;
+the API never returns a successful answer if this transaction fails.
+
+- `id` UUID PK; internal foreign-key target for spans
+- `trace_id` unique public trace identifier
+- `request_type`: currently `chat`
+- `question`: normalized question text
+- `rag_config_id` FK → `rag_configs`; the configuration is immutable, so this
+  is the exact effective configuration identity without copying credentials
+- `success`; failed rows require `error_code`, successful rows cannot have one
+- `error_message` nullable; provider bodies and credentials are never stored
+- `total_latency_ms` ≥ 0
+- `input_tokens`, `output_tokens`, `embedding_input_tokens`: provider-reported
+  usage, NULL when not reported
+- `estimated_cost`: native-cost total, NULL when usage or pricing is
+  unavailable; never a fabricated zero
+- `cost_currency`, `pricing_version`, and `cost_components` JSONB: explicit
+  pricing identity plus `embedding_query`, `generation_input`, and
+  `generation_output` breakdown
+- `answer` and `citations`: NULL when no answer is safely returned; valid
+  successful answers contain only citations mapped to the stored context
+- `prompt_snapshot` JSONB: prompt version/identifier and exact rendered text
+- `context_snapshot` JSONB: ranked evidence actually sent to generation,
+  including chunk, document, revision identity and content
+- `created_at`
+
+Source bytes, chunks, revisions, and immutable configurations remain retained
+after tombstoning/reprocess so the snapshots and evidence identities remain
+inspectable. No API trace field contains API keys.
 
 ### rag_spans
-- id UUID PK
-- trace_id
-- span_name
-- started_at
-- duration_ms
-- metadata JSONB
+Child rows are inserted atomically with `rag_traces`; only stages actually
+executed are present. Current `span_name` values are `request`,
+`query_embedding`, `retrieval`, `prompt_build`, `llm_generation`, and
+`citation_mapping`. Each row has:
+
+- `id` UUID PK
+- `trace_id` FK → `rag_traces(id)` `ON DELETE CASCADE`
+- `span_name`
+- `started_at`
+- `duration_ms` ≥ 0
+- `metadata` JSONB with stage identity, counts, provider-reported usage, and
+  classified diagnostic details where safe
+
+Reranking is not yet an executable Sprint 3 capability; a configuration that
+requests it is rejected rather than silently omitting a rerank span.

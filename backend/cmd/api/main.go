@@ -12,14 +12,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"ragbench-my/backend/internal/config"
 	"ragbench-my/backend/internal/documents"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
+	"ragbench-my/backend/internal/providers"
+	"ragbench-my/backend/internal/rag"
 	"ragbench-my/backend/internal/ragconfig"
 	"ragbench-my/backend/internal/schema"
+	"ragbench-my/backend/internal/trace"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -55,9 +58,20 @@ func run(logger *slog.Logger) error {
 	if err := os.MkdirAll(cfg.UploadDir, 0750); err != nil {
 		return fmt.Errorf("prepare upload directory: %w", err)
 	}
-	handler := httpapi.NewDocumentAPI(logger,
-		ragconfig.NewStore(pool),
+	configStore := ragconfig.NewStore(pool)
+	traceStore := trace.NewStore(pool)
+	chatPipeline := &rag.Pipeline{
+		Configs:   configStore,
+		Retriever: rag.NewRetriever(pool),
+		Embedder:  providers.NewOpenAI(cfg.EmbeddingAPIKey),
+		Generator: providers.NewOpenAI(cfg.GenerationAPIKey),
+		Traces:    traceStore,
+	}
+	handler := httpapi.NewFullAPI(logger,
+		configStore,
 		httpapi.DocumentOptions{Store: documents.NewStore(pool), Dispatcher: documents.NewAirflow(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword), UploadDir: cfg.UploadDir, MaxBytes: cfg.MaxUploadBytes},
+		chatPipeline,
+		traceStore,
 		health.NamedCheck{Name: "database", Check: pool.Ping},
 		health.NamedCheck{Name: "schema", Check: func(ctx context.Context) error {
 			return schema.Check(ctx, pool)
@@ -74,8 +88,10 @@ func run(logger *slog.Logger) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// Leave room for the sequential embedding and generation deadlines,
+		// trace persistence, and the structured response.
+		WriteTimeout: 3 * rag.GenerationTimeout,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	serveErr := make(chan error, 1)

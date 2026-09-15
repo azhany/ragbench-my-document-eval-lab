@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import OverviewView from './views/OverviewView.vue'
 import ComingSoonView from './views/ComingSoonView.vue'
 import LibraryView from './views/LibraryView.vue'
-
+import ChatView from './views/ChatView.vue'
 // Destinations whose owning stories have not landed yet route to
 // ComingSoonView, which states the owning stories explicitly and renders no
 // sample data or fake metrics.
@@ -22,7 +22,7 @@ const routes = [
   {
     path: '/chat',
     name: 'chat',
-    component: ComingSoonView,
+    component: ChatView,
     meta: { title: 'Chat', story: 'RB-09–RB-12 (Sprint 3)' },
   },
   {

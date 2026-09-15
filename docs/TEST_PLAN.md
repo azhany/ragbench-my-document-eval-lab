@@ -60,10 +60,59 @@ Browser gate: open Library, upload each format with a saved config, observe
 queued/processing/processed and nonzero counts; inspect an extraction failure,
 revision history, reprocess failure with prior evidence, retry-dispatch and
 delete confirmation. Test a narrow viewport and keyboard file/config controls.
-RB-11 historical trace rendering remains a downstream verification dependency.
+Sprint 3 historical trace rendering is covered by the Chat checks below.
 
 Sprint 2 execution evidence and outstanding gates are recorded in
 [SPRINT_2_VERIFICATION.md](SPRINT_2_VERIFICATION.md).
+
+## Sprint 3 executable verification
+
+Backend unit and PostgreSQL integration coverage:
+
+```sh
+cd backend
+RAGBENCH_TEST_DATABASE_URL=postgres://ragbench:ragbench@localhost:5432/<fresh-db> \
+  go test -race ./...
+```
+
+The migrated database must be separate from the application database. Sprint 3
+tests cover deterministic pgvector ranking/ties/top-k and compatible revision
+filtering; prompt budgeting; citation missing/invalid/insufficient outcomes;
+provider response validation; timeout/rate-limit/malformed classifications;
+trace list/detail snapshots; exact cost components; and atomic trace-write
+failure behavior.
+
+Frontend verification:
+
+```sh
+cd frontend
+npm test
+npm run build
+```
+
+Live failure-path smoke, with the stack rebuilt and healthy, exercises a chat
+request through the real API using the configured provider credentials. A
+provider failure must return a classified error with `trace_id`; fetching
+`GET /api/v1/traces/{trace_id}` must show the failed trace and executed spans.
+This check does not print credentials or provider response bodies.
+
+Authorized happy-path smoke additionally requires a processed document whose
+embedding identity matches the selected configuration and valid embedding and
+generation credentials. Ask a grounded question, assert a non-empty answer
+and mapped citations, then fetch the trace detail and compare its prompt,
+context, usage, cost, and spans with the response. No test double or
+`INSUFFICIENT_EVIDENCE` response satisfies the real-provider gate.
+
+Browser verification opens Chat, selects a saved configuration, submits the
+same grounded question, opens a citation and persisted trace, inspects the
+historical context drawer, then exercises loading, empty retrieval, provider
+failure, and unavailable-cost states. Reopening a trace must show its saved
+configuration/context after current UI selection changes.
+
+Sprint 3 retains two external prerequisites: valid provider credentials for
+the authorized happy path and a connected browser for the walkthrough. A
+failed prerequisite is recorded as blocked rather than presented as a
+successful story acceptance.
 
 ## Unit tests
 

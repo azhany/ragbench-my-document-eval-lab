@@ -32,6 +32,7 @@ function httpError(status, body) {
     code: envelope?.code ?? 'http_error',
     message,
     fields: envelope?.fields ?? [],
+    trace_id: envelope?.trace_id ?? '',
     payload: body,
   }
 }

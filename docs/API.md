@@ -1,4 +1,4 @@
-# API Sketch
+# API Contract
 
 ## Health endpoints (implemented)
 
@@ -64,7 +64,7 @@ Current check set:
 
 ### `GET /`
 
-Service information: `{"service":"ragbench-api","status":"ok","resources":["/healthz","/readyz","/api/v1/rag-configs","/api/v1/documents"]}`.
+Service information: `{"service":"ragbench-api","status":"ok"}` plus the implemented resource roots `["/healthz","/readyz","/api/v1/rag-configs","/api/v1/documents","/api/v1/chat","/api/v1/traces"]`.
 
 ## RAG configurations (implemented)
 
@@ -276,13 +276,18 @@ Integration references: [Airflow 3.0.6 public API authentication](https://airflo
 [Airflow 3.0.6 REST API](https://airflow.apache.org/docs/apache-airflow/3.0.6/stable-rest-api-ref.html),
 [OpenAI create embeddings](https://developers.openai.com/api/reference/resources/embeddings/methods/create).
 
-*The following resource groups remain a sketch; they are not yet implemented.*
+## Chat and traces (RB-09–RB-12 implemented)
 
-## Chat
+The chat pipeline is synchronous in Go. It embeds the question with the
+configuration's persisted embedding identity, retrieves compatible active
+ready revisions through `searchable_chunks`, builds the versioned prompt,
+calls the configured generation provider, maps citations, and writes one
+trace plus its spans transactionally. Evaluation will call this same pipeline
+when RB-14 lands.
 
-`POST /api/v1/chat`
+### `POST /api/v1/chat`
 
-Request:
+Request bodies are JSON, limited to 64 KiB, and reject unknown fields:
 
 ```json
 {
@@ -291,16 +296,21 @@ Request:
 }
 ```
 
-Response:
+`question` is trimmed and must contain 1–2,000 Unicode characters.
+`config_id` must identify an existing immutable RAG configuration. The
+selected configuration must not request an unavailable capability such as
+hybrid retrieval or reranking.
+
+Response `200 OK`:
 
 ```json
 {
-  "answer": "...",
+  "answer": "Approval needs two signatures [1].",
   "citations": [
     {
       "document_id": "uuid",
       "chunk_id": "uuid",
-      "snippet": "..."
+      "snippet": "Approval needs two signatures."
     }
   ],
   "trace": {
@@ -308,10 +318,88 @@ Response:
     "latency_ms": 2940,
     "input_tokens": 1102,
     "output_tokens": 284,
-    "estimated_cost": 0.041
+    "embedding_input_tokens": 12,
+    "estimated_cost": 0.000336,
+    "cost_currency": "USD",
+    "cost_unavailable_reason": null,
+    "pricing_version": "2026-01-openai"
   }
 }
 ```
+
+The query embedding, generation input, and generation output are the three
+cost components. OpenAI rates are explicit in
+`backend/internal/providers/providers.go`, and the query total is rounded to
+six decimal places in native USD. Provider-reported token fields and
+`estimated_cost` are `null` when usage is missing or pricing is unknown;
+`cost_unavailable_reason` is then `usage_unavailable` or
+`pricing_unavailable`, never a fabricated zero.
+
+Prompt `v1` includes the question and whole retrieved chunks in rank order
+until the 24,000-Unicode-character context budget. The template labels
+document text as untrusted evidence, not instructions. The trace detail
+stores the exact rendered prompt and the context actually sent.
+The pipeline bounds the full sequential request at 120 seconds and keeps a
+longer server response deadline so timeout and persistence errors still return
+as structured responses.
+
+Answers must contain numbered markers such as `[1]`. Markers are one-based
+indices into the context sent to the model; duplicates are returned once in
+first-seen order. An outside, zero, negative, or otherwise invalid index is a
+`citation_invalid` failure. An answer with no marker is a
+`citation_missing` failure, and no uncited answer is returned. The exact
+`INSUFFICIENT_EVIDENCE` answer is a successful empty-citation response.
+
+Errors use the shared `{"error":{"code":"...","message":"...","trace_id":"..."}}`
+envelope. `trace_id` is included after a trace has been created and persisted;
+pre-execution validation/config errors have no trace:
+
+| HTTP | Code | Meaning |
+|---|---|---|
+| 400 | `invalid_body` | malformed JSON, unknown field, empty body, or body over 64 KiB |
+| 400 | `validation_failed` | question/config field validation failed |
+| 404 | `not_found` | unknown or malformed configuration ID |
+| 409 | `revision_unavailable` | no active ready revision compatible with the saved embedding identity |
+| 422 | `capability_unavailable` | requested hybrid retrieval or reranking is not executable |
+| 422 | `retrieval_empty` | a compatible retrieval boundary exists but returned no evidence |
+| 502 | `retrieval_failed` | pgvector retrieval or retrieval-boundary query failed |
+| 502 | `embedding_failed` | query embedding provider failure or invalid vector response |
+| 502 | `model_failed` | non-timeout/non-rate-limited generation provider failure |
+| 502 | `model_rate_limited` | generation provider returned HTTP 429 |
+| 502 | `malformed_response` | generation provider response was invalid or empty |
+| 502 | `citation_missing` / `citation_invalid` | generated answer is not safely grounded |
+| 504 | `model_timeout` | generation exceeded its 60-second deadline |
+| 500 | `persistence_failed` | trace write failed; answer is not returned as traceable |
+
+Provider response bodies and credentials are never returned. Provider,
+retrieval, citation, and persistence failures are logged with the trace ID
+when one exists.
+
+### `GET /api/v1/traces`
+
+Lists successful and failed chat traces newest first. `limit` is optional
+(default `50`, maximum `200`); invalid values return `422 invalid_limit`.
+Each summary contains `trace_id`, `request_type`, `question`, `rag_config_id`,
+`success`, nullable `error_code`, `total_latency_ms`, nullable
+`input_tokens`, `output_tokens`, `embedding_input_tokens`,
+`estimated_cost`, `cost_unavailable_reason`, and `created_at`.
+
+### `GET /api/v1/traces/{traceId}`
+
+Returns the complete persisted trace, or `404 not_found` for an unknown or
+malformed ID. In addition to the list fields it returns nullable
+`error_message`, `cost_currency`, `pricing_version`, `cost_components`,
+`answer`, `citations`, the immutable `config` object, `prompt_snapshot`,
+`context_snapshot`, and ordered `spans`. Spans contain `span_name`,
+`started_at`, `duration_ms`, and provider/stage metadata.
+
+The detail contract is the historical source for the Chat context drawer:
+reopening a trace uses its saved configuration, rendered prompt, and ranked
+evidence snapshot rather than current configuration or document state. Failed
+traces retain the executed spans plus prompt/context snapshots available
+before the failing stage; early embedding/retrieval failures have empty
+snapshots. A trace write failure is returned as `persistence_failed` and
+cannot look like a successful trace.
 
 ## Evaluation
 
