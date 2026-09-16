@@ -19,7 +19,7 @@ import urllib.request
 BASE = os.environ.get("API_URL", "http://localhost:8080")
 FIXTURE = "db/fixtures/golden_dataset_v1.json"
 CORPUS_DIR = "db/fixtures/corpus"
-CONFIG_NAME = os.environ.get("GOLDEN_CONFIG_NAME", "golden-demo-config")
+CONFIG_NAME = os.environ.get("GOLDEN_CONFIG_NAME", "golden-demo-hf")
 DATASET_NAME = "golden-dataset-v1"
 WAIT_SECONDS = int(os.environ.get("SEED_WAIT_SECONDS", "600"))
 
@@ -62,8 +62,8 @@ def ensure_config(configs):
             "top_k": 5,
             "rerank_enabled": False,
             "prompt_version": "v1",
-            "model_profile": "openai-gpt-4o-mini",
-            "embedding_profile": "openai-text-embedding-3-small",
+            "model_profile": "opencode-go-glm-5.3-flash",
+            "embedding_profile": "huggingface-bge-small-en-v1.5",
         })
         print(f"rag config created: {CONFIG_NAME} -> {created['id']}")
         return created["id"]
@@ -105,6 +105,26 @@ def document_already_processed(docs, filename):
     return None
 
 
+def find_live_document(docs, filename):
+    for d in docs:
+        if d.get("filename") == filename and d.get("deleted_at") is None:
+            return d["id"]
+    return None
+
+
+def reprocess_document(doc_id, config_id):
+    req = urllib.request.Request(
+        BASE + f"/api/v1/documents/{doc_id}/reprocess",
+        data=json.dumps({"config_id": config_id}).encode(),
+        method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        sys.exit(f"reprocess of {doc_id} failed: HTTP {e.code} {detail}")
+
+
 def main():
     payload = json.load(open(FIXTURE))
     configs = get("/api/v1/rag-configs")["configs"]
@@ -119,10 +139,19 @@ def main():
             src = os.path.join(CORPUS_DIR, filename)
             if not os.path.exists(src):
                 sys.exit(f"corpus file missing: {src}")
-            print(f"uploading {filename} (real embedding ingestion; failures surface from the API)")
-            result = upload_doc(src, config_id)
-            doc = result.get("document") or result
-            doc_id = doc["id"]
+            live = find_live_document(docs, filename)
+            if live:
+                # Same bytes already live (scroll a failed run): build a new
+                # revision under the demo config through document_reindex.
+                print(f"reprocessing {filename} -> new revision (config {config_id})")
+                result = reprocess_document(live, config_id)
+                doc = result.get("document") or result
+                doc_id = doc["id"]
+            else:
+                print(f"uploading {filename} (real embedding ingestion; failures surface from the API)")
+                result = upload_doc(src, config_id)
+                doc = result.get("document") or result
+                doc_id = doc["id"]
         deadline = time.time() + WAIT_SECONDS
         while True:
             d = get(f"/api/v1/documents/{doc_id}")

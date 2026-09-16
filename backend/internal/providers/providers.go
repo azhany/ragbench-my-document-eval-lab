@@ -117,8 +117,8 @@ var rubrics = map[string]Rubric{
 	"rubric-v1": {
 		Version:       "rubric-v1",
 		Identifier:    "relevance-groundedness-1-5",
-		JudgeProvider: "openai",
-		JudgeModel:    "gpt-4o-mini",
+		JudgeProvider: "opencode-go",
+		JudgeModel:    "glm-5.3-flash",
 		Template: `You are a strict evaluator scoring a RAG system's answer.
 
 Score the ANSWER on answer relevance: does it directly address the QUESTION
@@ -214,8 +214,12 @@ Evidence:
 
 // DefaultRubricVersion and its judge identity are exported so evaluation
 // callers persist and price the judge call from one explicit source.
+// The judge model defaults to the stack's OpenAI-compatible generation
+// provider (opencode-go profile); OPENAI_* profiles remain configurable in
+// the registry for deployments that use them, but no test or verification
+// path relies on them.
 const (
 	DefaultRubricVersion = "rubric-v1"
-	RubricJudgeProvider  = "openai"
-	RubricJudgeModel     = "gpt-4o-mini"
+	RubricJudgeProvider  = "opencode-go"
+	RubricJudgeModel     = "glm-5.3-flash"
 )

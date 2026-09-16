@@ -63,7 +63,7 @@ func (o *Orchestrator) Advance(ctx context.Context, experimentID string) (Advanc
 	}
 
 	for _, c := range e.Combinations {
-		if c.Failed() {
+		if c.Failed() || c.Done() {
 			continue
 		}
 		result, err := o.progressCombination(ctx, e, c)

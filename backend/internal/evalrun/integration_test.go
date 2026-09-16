@@ -35,8 +35,8 @@ func TestPinInputsAndPersistVersionedScoring(t *testing.T) {
 	cfg, err := cfgStore.Create(ctx, ragconfig.CreateRequest{
 		Name:      "evalrun-test-" + uuid.NewString()[:8],
 		ChunkSize: 500, ChunkOverlap: 80, RetrievalMode: "vector", TopK: 5,
-		PromptVersion: "v1", ModelProfile: "openai-gpt-4o-mini",
-		EmbeddingProfile: "openai-text-embedding-3-small",
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,13 +62,22 @@ func TestPinInputsAndPersistVersionedScoring(t *testing.T) {
 	}
 	var corpus []struct {
 		RevisionID string `json:"revision_id"`
+		Checksum   string `json:"checksum"`
 	}
 	if err := json.Unmarshal(run.CorpusRevisions, &corpus); err != nil {
 		t.Fatal(err)
 	}
-	// A failed/missing reindex still pins (null revision) rather than hiding.
-	if len(corpus) != 0 || run.CorpusRevisions == nil {
-		t.Fatalf("corpus snapshot must be explicit: %s", run.CorpusRevisions)
+	// The pinned corpus snapshot is always explicit JSON: a list of pinned
+	// per-document revisions, or null when nothing was compatible yet —
+	// either way diagnosable, never silently hidden. Other packages' leftover
+	// test documents may legitimately appear on a shared verification DB.
+	if run.CorpusRevisions == nil {
+		t.Fatal("corpus snapshot must be persisted")
+	}
+	for _, entry := range corpus {
+		if entry.RevisionID == "" || entry.Checksum == "" {
+			t.Fatalf("corpus snapshot entries must be pinned with identity: %+v", entry)
+		}
 	}
 
 	// Unknown versions rejected before dispatch.

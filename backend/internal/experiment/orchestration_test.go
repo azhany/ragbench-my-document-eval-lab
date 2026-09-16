@@ -44,11 +44,32 @@ func (s *stubDispatch) DispatchIndex(ctx context.Context, cfg ragconfig.Config) 
 	return s.err
 }
 
-type fakeRunner struct{ launched []string }
+// fakeRunner creates a real pinned eval_runs row for each launched
+// configuration so the durable FK link semantics are exercised faithfully;
+// it reuses the real evalrun store against the shared verification DB.
+type fakeRunner struct {
+	runs     *evalrun.Store
+	datasets *evaldata.Store
+	configs  *ragconfig.Store
+	pool     *pgxpool.Pool
+	launched []string
+}
 
 func (f *fakeRunner) LaunchRun(ctx context.Context, cfg ragconfig.Config, datasetID string, datasetVersion int, rubric string, scoringK int) (evalrun.Run, error) {
 	f.launched = append(f.launched, cfg.ID)
-	return evalrun.Run{ID: "run-for-" + cfg.ID, Status: evalrun.StatusRunning}, nil
+	run, err := f.runs.CreateRun(ctx, f.datasets, f.configs, evalrun.CreateRequest{
+		DatasetID: datasetID, DatasetVersion: datasetVersion, RagConfigID: cfg.ID,
+		RubricVersion: rubric, ScoringK: scoringK})
+	if err != nil {
+		return evalrun.Run{}, err
+	}
+	// The stub short-circuits execution success (the real runner records
+	// dispatch, cases and finalize separately): complete the run so the
+	// combination links converge deterministically.
+	if _, err := f.pool.Exec(ctx, `UPDATE eval_runs SET dag_run_id='stub_'||id, status='completed' WHERE id=$1`, run.ID); err != nil {
+		return evalrun.Run{}, err
+	}
+	return f.runs.GetRun(ctx, run.ID)
 }
 
 func seedDataset(t *testing.T, datasets *evaldata.Store, pool *pgxpool.Pool) evaldata.Dataset {
@@ -76,13 +97,14 @@ func seedDataset(t *testing.T, datasets *evaldata.Store, pool *pgxpool.Pool) eva
 	return ds
 }
 
-func drive(orch *Orchestrator, id string, max int) (AdvanceResult, error) {
+func drive(tb testing.TB, orch *Orchestrator, id string, max int) (AdvanceResult, error) {
 	var result AdvanceResult
 	for i := 0; i < max; i++ {
 		r, err := orch.Advance(context.Background(), id)
 		if err != nil {
 			return result, err
 		}
+		tb.Logf("advance -> %+v", r)
 		result = r
 		switch r.State {
 		case StatusCompleted, StatusPartial, StatusFailed, StatusDispatchFailed:
@@ -107,14 +129,14 @@ func TestTwoConfigSweepSeparateRuns(t *testing.T) {
 	base, err := configs.Create(ctx, ragconfig.CreateRequest{
 		Name:      "exp-base-" + uuid.NewString()[:8],
 		ChunkSize: 500, ChunkOverlap: 80, RetrievalMode: "vector", TopK: 5,
-		PromptVersion: "v1", ModelProfile: "openai-gpt-4o-mini",
-		EmbeddingProfile: "openai-text-embedding-3-small"})
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ds := seedDataset(t, datasets, pool)
 
-	runner := &fakeRunner{}
+	runner := &fakeRunner{runs: runs, datasets: datasets, configs: configs, pool: pool}
 	orch := &Orchestrator{Store: store, Configs: configs, ConfigCreator: configs,
 		Datasets: datasets, Runner: runner, Runs: runs,
 		IndexPlanner: stubPlanner{needed: false}, IndexDispatch: &stubDispatch{}}
@@ -122,7 +144,7 @@ func TestTwoConfigSweepSeparateRuns(t *testing.T) {
 	e, err := store.Create(ctx, datasets, configs, CreateRequest{
 		Name:      "sweep-" + uuid.NewString()[:8],
 		DatasetID: ds.ID, RubricVersion: "rubric-v1", ScoringK: 5,
-		BaseConfigID: base.ID, Matrix: Matrix{ChunkSizes: []int{800}}})
+		BaseConfigID: base.ID, Matrix: Matrix{ChunkSizes: []int{500, 800}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +152,7 @@ func TestTwoConfigSweepSeparateRuns(t *testing.T) {
 		t.Fatalf("persisted expansion = %d, want base+1 combos", len(e.Combinations))
 	}
 
-	result, err := drive(orch, e.ID, 12)
+	result, err := drive(t, orch, e.ID, 40)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,33 +183,33 @@ func TestTwoConfigSweepSeparateRuns(t *testing.T) {
 
 // A failed reindex prevents evaluation against the wrong corpus.
 func TestFailedReindexBlocksCombination(t *testing.T) {
-	store, configs, datasets, runscrawl, pool := integrationAll(t)
+	store, configs, datasets, runs, pool := integrationAll(t)
 	ctx := context.Background()
 	base, err := configs.Create(ctx, ragconfig.CreateRequest{
 		Name:      "exp-fail-" + uuid.NewString()[:8],
 		ChunkSize: 500, ChunkOverlap: 80, RetrievalMode: "vector", TopK: 5,
-		PromptVersion: "v1", ModelProfile: "openai-gpt-4o-mini",
-		EmbeddingProfile: "openai-text-embedding-3-small"})
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ds := seedDataset(t, datasets, pool)
 
-	runner := &fakeRunner{}
+	runner := &fakeRunner{runs: runs, datasets: datasets, configs: configs, pool: pool}
 	orch := &Orchestrator{Store: store, Configs: configs, ConfigCreator: configs,
-		Datasets: datasets, Runner: runner, Runs: runscrawl,
+		Datasets: datasets, Runner: runner, Runs: runs,
 		IndexPlanner:  stubPlanner{needed: true},
 		IndexDispatch: &stubDispatch{err: os.ErrDeadlineExceeded}}
 
 	e, err := store.Create(ctx, datasets, configs, CreateRequest{
 		Name:      "sweep-fail-" + uuid.NewString()[:8],
 		DatasetID: ds.ID, RubricVersion: "rubric-v1", ScoringK: 5,
-		BaseConfigID: base.ID, Matrix: Matrix{ChunkSizes: []int{800}}})
+		BaseConfigID: base.ID, Matrix: Matrix{ChunkSizes: []int{500, 800}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := drive(orch, e.ID, 12)
+	result, err := drive(t, orch, e.ID, 40)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,8 +241,8 @@ func TestRetryKeepsSuccessfulCombinationLinks(t *testing.T) {
 	base, err := configs.Create(ctx, ragconfig.CreateRequest{
 		Name:      "exp-retry-" + uuid.NewString()[:8],
 		ChunkSize: 500, ChunkOverlap: 80, RetrievalMode: "vector", TopK: 5,
-		PromptVersion: "v1", ModelProfile: "openai-gpt-4o-mini",
-		EmbeddingProfile: "openai-text-embedding-3-small"})
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +250,7 @@ func TestRetryKeepsSuccessfulCombinationLinks(t *testing.T) {
 
 	broken := &stubDispatch{err: os.ErrPermission}
 	orch := &Orchestrator{Store: store, Configs: configs, ConfigCreator: configs,
-		Datasets: datasets, Runner: &fakeRunner{}, Runs: runs,
+		Datasets: datasets, Runner: &fakeRunner{runs: runs, datasets: datasets, configs: configs, pool: pool}, Runs: runs,
 		IndexPlanner: stubPlanner{needed: true}, IndexDispatch: broken}
 	e, err := store.Create(ctx, datasets, configs, CreateRequest{
 		Name:      "sweep-retry-" + uuid.NewString()[:8],
@@ -237,7 +259,7 @@ func TestRetryKeepsSuccessfulCombinationLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := drive(orch, e.ID, 4); err != nil {
+	if _, err := drive(t, orch, e.ID, 4); err != nil {
 		t.Fatal(err)
 	}
 	detail, err := store.Get(ctx, e.ID)

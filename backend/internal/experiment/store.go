@@ -69,6 +69,17 @@ func (c Combination) Setting() (CombinationSetting, error) {
 // Failed reports whether the cell recorded an orchestration failure.
 func (c Combination) Failed() bool { return c.IndexError != "" || c.EvalRunError != "" }
 
+// Done reports whether the cell's linked run reached a terminal state (the
+// experiment still derives its own aggregate from run statuses).
+func (c Combination) Done() bool {
+	switch c.EvalRunStatus {
+	case evalrun.StatusCompleted, evalrun.StatusPartial, evalrun.StatusFailed,
+		evalrun.StatusDispatchFailed:
+		return true
+	}
+	return false
+}
+
 // ConfigReader reads immutable config identities.
 type ConfigReader interface {
 	Get(ctx context.Context, id string) (ragconfig.Config, error)

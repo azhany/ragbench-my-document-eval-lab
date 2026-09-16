@@ -24,8 +24,8 @@ func TestExecutePersistsScoredResultsIdempotently(t *testing.T) {
 	cfg, err := cfgStore.Create(ctx, ragconfig.CreateRequest{
 		Name:      "exec-test-" + uuid.NewString()[:8],
 		ChunkSize: 500, ChunkOverlap: 80, RetrievalMode: "vector", TopK: 5,
-		PromptVersion: "v1", ModelProfile: "openai-gpt-4o-mini",
-		EmbeddingProfile: "openai-text-embedding-3-small",
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -113,8 +113,8 @@ func TestJudgeFailureIsEvaluatorFailed(t *testing.T) {
 	cfg, cfgErr := cfgStore.Create(ctx, ragconfig.CreateRequest{
 		Name:      "exec-test-" + uuid.NewString()[:8],
 		ChunkSize: 500, ChunkOverlap: 80, RetrievalMode: "vector", TopK: 5,
-		PromptVersion: "v1", ModelProfile: "openai-gpt-4o-mini",
-		EmbeddingProfile: "openai-text-embedding-3-small"})
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5"})
 	if cfgErr != nil {
 		t.Fatal(cfgErr)
 	}
