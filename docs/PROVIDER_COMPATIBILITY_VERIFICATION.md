@@ -104,3 +104,21 @@ which explains the prior OpenAI HTTP 401 result.
   historical trace fully inspectable via `GET /api/v1/traces/{id}`.
 - This closes the outstanding verification for RB-10 and RB-11 (RB-12's
   browser walkthrough remains open, no browser surface available).
+
+## RB-12 browser walkthrough close-out (2026-09-16)
+
+The "no browser surface available" blocker was cleared: a real headless
+Chromium (Playwright, Chrome Headless Shell 151) drove the live frontend at
+`http://localhost:5173` against the live API. 15/15 checks passed:
+
+- Config selection, grounded question submission (HTTP 200).
+- Real answer, citation cards (count and snippets matching the API
+  response), and selected config displayed.
+- Latency, input/output tokens, and `cost-unavailable` /
+  `usage_unavailable` state matched the persisted trace exactly.
+- "Open trace" navigation rendered the successful chat trace panel with
+  the historical config, the full retrieved-context snapshot as sent,
+  and all six persisted spans.
+- Out-of-library question showed the distinct insufficient-evidence state.
+
+This closes all remaining RB-12 acceptance criteria and verification checks.
