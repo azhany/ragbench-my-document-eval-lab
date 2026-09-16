@@ -1,0 +1,126 @@
+{
+  "name": "golden-dataset-v1",
+  "description": "Reviewed 20-case demonstration golden dataset over the three RAGbench-MY demonstration sources (see db/fixtures/golden_dataset_v1_README.txt). Reference unit: document.",
+  "cases": [
+    {
+      "case_key": "fg-01",
+      "question": "How many approval stages does an expenditure request go through?",
+      "reference_answer": "Three: technical review by the division cost officer, certification by the head of finance, and counter-signature by the controlling officer.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "fg-02",
+      "question": "When does the ministry tender board convene for large requests?",
+      "reference_answer": "For requests above RM 500,000 the tender board must convene within five working days of technical review.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "fg-03",
+      "question": "What is the direct-purchase threshold and what is required between it and RM 100,000?",
+      "reference_answer": "Direct purchase up to RM 5,000; between RM 5,000 and RM 100,000, at least three quotations are required.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "fg-04",
+      "question": "When is open tender mandatory?",
+      "reference_answer": "Above RM 100,000 open tender applies.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "fg-05",
+      "question": "Can emergency procurement bypass open tender, and what must be reported?",
+      "reference_answer": "Yes, with written justification; the commitment must be reported to the audit committee within 14 days.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "fg-06",
+      "question": "What is the annual budget submission deadline and what happens to a late submission?",
+      "reference_answer": "Two months before fiscal year start; a late submission is returned once for correction, then escalated to the controlling officer.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "fg-07",
+      "question": "Does the guidelines require a board meeting for any expenditure request?",
+      "reference_answer": "Yes: for requests above RM 500,000 the ministry tender board must convene within five working days of technical review.",
+      "expected_source_name": "finance-guidelines.txt"
+    },
+    {
+      "case_key": "ds-01",
+      "question": "What must a data sharing agreement contain at minimum?",
+      "reference_answer": "The dataset owner, permitted purposes, and a review date no later than 24 months after signature.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "ds-02",
+      "question": "How are datasets containing personal data handled before sharing?",
+      "reference_answer": "They must first pass an anonymisation review; de-identified logs keep latencies and totals but drop identifiers, free-text remarks, and device fingerprints.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "ds-03",
+      "question": "How long do shared extracts remain valid?",
+      "reference_answer": "90 days after the review date unless the agreement is renewed; expired extracts are deleted and the deletion recorded.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "ds-04",
+      "question": "How often is the register of active agreements reviewed?",
+      "reference_answer": "Quarterly.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "ds-05",
+      "question": "What is the review date limit on a data sharing agreement?",
+      "reference_answer": "No later than 24 months after signature.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "ds-06",
+      "question": "What happens to an expired extract?",
+      "reference_answer": "It is deleted and the deletion is recorded in the register.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "ds-07",
+      "question": "Does the data sharing policy regulate personal data between departments directly?",
+      "reference_answer": "No; personal data must pass anonymisation review first.",
+      "expected_source_name": "data-sharing-policy.txt"
+    },
+    {
+      "case_key": "hr-01",
+      "question": "How many paid leave days per year are staff entitled to?",
+      "reference_answer": "21 paid leave days per year, with up to 5 carried forward.",
+      "expected_source_name": "hr-practice-handbook.txt"
+    },
+    {
+      "case_key": "hr-02",
+      "question": "How early must a leave application be lodged?",
+      "reference_answer": "At least 12 working days before the first day of leave.",
+      "expected_source_name": "hr-practice-handbook.txt"
+    },
+    {
+      "case_key": "hr-03",
+      "question": "When is performance reviewed during probation?",
+      "reference_answer": "Twice, at month two and month four of the six-month probation.",
+      "expected_source_name": "hr-practice-handbook.txt"
+    },
+    {
+      "case_key": "hr-04",
+      "question": "Can carried-forward leave be paid out in cash?",
+      "reference_answer": "No; carried-forward days are credited to work only.",
+      "expected_source_name": "hr-practice-handbook.txt"
+    },
+    {
+      "case_key": "hr-05",
+      "question": "What additional approval does leave longer than 10 consecutive days need?",
+      "reference_answer": "Counter-approval by the department head.",
+      "expected_source_name": "hr-practice-handbook.txt"
+    },
+    {
+      "case_key": "hr-06",
+      "question": "How many paid sick leave days apply during probation?",
+      "reference_answer": "Up to 10.",
+      "expected_source_name": "hr-practice-handbook.txt"
+    }
+  ]
+}

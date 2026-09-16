@@ -1,0 +1,16 @@
+HR Practice Handbook — RAGbench-MY demonstration corpus (fictional)
+===================================================================
+
+Section A: Annual leave.
+Staff are entitled to 21 paid leave days per year. Unused leave may be
+carried forward up to 5 days into the next year; carried-forward days are
+credited to work only and never paid out in cash.
+
+Section B: Leave application.
+Applications are lodged in the leave portal at least 12 working days before
+the first day of leave. Leave longer than 10 consecutive days requires
+counter-approval by the department head.
+
+Section C: Probation.
+Probation lasts six months. Performance is reviewed twice, at month two and
+month four. Up to 10 paid sick leave days apply during probation.

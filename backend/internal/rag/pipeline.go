@@ -25,7 +25,10 @@ const (
 
 // RequestTypeChat labels normal chat traces; Sprint 4 evaluation traces get
 // their own request type.
-const RequestTypeChat = "chat"
+const (
+	RequestTypeChat       = "chat"
+	RequestTypeEvaluation = "evaluation"
+)
 
 // Span names, matching the migration's rag_spans_name_check.
 const (
@@ -71,7 +74,7 @@ type TraceRecord struct {
 // pgvector implementation) satisfies it; tests substitute deterministic
 // doubles.
 type EvidenceSource interface {
-	Retrieve(ctx context.Context, cfg ragconfig.Config, vector []float32) ([]Evidence, int64, *Error)
+	Retrieve(ctx context.Context, cfg ragconfig.Config, question string, vector []float32) ([]Evidence, int64, *Error)
 }
 
 // Pipeline executes the shared RAG query pipeline. Both chat and evaluation
@@ -112,6 +115,17 @@ type ChatResponse struct {
 	Answer    string     `json:"answer"`
 	Citations []Citation `json:"citations"`
 	Trace     ChatTrace  `json:"trace"`
+	// Retrieved lists every ranked evidence chunk actually sent as context
+	// (document-level identities in rank order). Chat clients may ignore it;
+	// evaluation scoring uses it as the retrieval observation.
+	Retrieved []RetrievedIdentity `json:"retrieved"`
+}
+
+// RetrievedIdentity is one context chunk's relevance-unit identity.
+type RetrievedIdentity struct {
+	DocumentID string `json:"document_id"`
+	ChunkID    string `json:"chunk_id"`
+	Rank       int    `json:"rank"`
 }
 
 // ValidateChatRequest checks the raw payload bounds.
@@ -131,12 +145,24 @@ func ValidateChatRequest(req ChatRequest) error {
 	return nil
 }
 
-// Ask runs the full pipeline: validate, load config, embed, retrieve, build
-// the prompt, generate, map citations, persist the trace. Every executed
-// outcome — including classified failures — produces a correlated trace.
-// Validation, unknown-config, and capability rejections happen before any
-// provider call and produce none.
+// Ask runs the full pipeline for normal chat.
 func (p *Pipeline) Ask(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	return p.run(ctx, req, RequestTypeChat)
+}
+
+// AskEvaluation runs the exact same pipeline with evaluation request
+// attribution (RB-14): identical stages, identical code, but traces record
+// request_type=evaluation so evaluation cases are attributable.
+func (p *Pipeline) AskEvaluation(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	return p.run(ctx, req, RequestTypeEvaluation)
+}
+
+// run is the single pipeline implementation: validate, load config, embed,
+// retrieve, build the prompt, generate, map citations, persist the trace.
+// Every executed outcome — including classified failures — produces a
+// correlated trace. Validation, unknown-config, and capability rejections
+// happen before any provider call and produce none.
+func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string) (ChatResponse, error) {
 	// The question is normalized once: trimmed whitespace is not a question,
 	// and traces/prompts store the normalized form.
 	req.Question = strings.TrimSpace(req.Question)
@@ -181,7 +207,7 @@ func (p *Pipeline) Ask(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			generationProfile.Provider, generationProfile.Model,
 			generationInputTokens, generationOutputTokens)
 		if perr := p.persistTrace(ctx, TraceRecord{
-			TraceID: traceID, RequestType: RequestTypeChat,
+			TraceID: traceID, RequestType: requestType,
 			Question: req.Question, ConfigID: cfg.ID,
 			Success:              false,
 			ErrorCode:            serr.Code,
@@ -219,9 +245,16 @@ func (p *Pipeline) Ask(ctx context.Context, req ChatRequest) (ChatResponse, erro
 
 	// Retrieval stage.
 	retrievalStart := now()
-	evidence, retrievalMS, retrievalErr := p.Retriever.Retrieve(ctx, cfg, vector)
+	evidence, retrievalMS, retrievalErr := p.Retriever.Retrieve(ctx, cfg, req.Question, vector)
 	retrievalSpan := SpanRecord{Name: SpanRetrieval,
 		StartedAt: retrievalStart, DurationMS: retrievalMS, Metadata: map[string]any{"top_k": cfg.TopK, "returned": len(evidence)}}
+	if cfg.RetrievalMode == ragconfig.RetrievalModeHybrid {
+		retrievalSpan.Metadata["retrieval_mode"] = "hybrid"
+		retrievalSpan.Metadata["fusion_method"] = cfg.FusionMethod
+		retrievalSpan.Metadata["rrf_rank_constant"] = cfg.RRFConstant
+		retrievalSpan.Metadata["fts_candidate_limit"] = cfg.FTSCandidateLimit
+		retrievalSpan.Metadata["vector_candidate_limit"] = cfg.VectorCandidateLimit
+	}
 	if retrievalErr != nil {
 		return fail(retrievalErr, embedSpan, retrievalSpan)
 	}
@@ -295,9 +328,14 @@ func (p *Pipeline) Ask(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	if citations == nil {
 		citations = []Citation{}
 	}
+	retrieved := make([]RetrievedIdentity, len(selected))
+	for i, e := range selected {
+		retrieved[i] = RetrievedIdentity{DocumentID: e.DocumentID, ChunkID: e.ChunkID, Rank: i + 1}
+	}
 	resp := ChatResponse{
 		Answer:    genRes.Text,
 		Citations: citations,
+		Retrieved: retrieved,
 		Trace: ChatTrace{
 			TraceID:              traceID,
 			LatencyMS:            now().Sub(startedAt).Milliseconds(),
@@ -324,7 +362,7 @@ func (p *Pipeline) Ask(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	spans := []SpanRecord{embedSpan, retrievalSpan, promptSpan, genSpan, citeSpan,
 		{Name: SpanRequest, StartedAt: startedAt, DurationMS: total}}
 	if perr := p.persistTrace(ctx, TraceRecord{
-		TraceID: traceID, RequestType: RequestTypeChat,
+		TraceID: traceID, RequestType: requestType,
 		Question: req.Question, ConfigID: cfg.ID,
 		Success:              true,
 		TotalLatencyMS:       total,

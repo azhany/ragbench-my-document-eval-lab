@@ -28,13 +28,29 @@ Example row:
 
 ## Metrics
 
-### Recall@K
+### Recall@K (implemented, `backend/internal/evaluation`)
 
-Whether expected evidence appears in the first K retrieved chunks.
+Relevant evidence retrieved within K divided by total expected evidence, at
+the documented relevance unit: the document identity ("which stored source
+contains the expected evidence"). Deliberate conventions:
+- K semantics: the first K retrieved chunks AFTER retrieval truncation
+  (scoring truncates defensively to the configured K).
+- Deduplication: multiple chunks of the same expected document collapse to
+  one hit; a document counts once.
+- Missing relevance: an absent expected document stays in the denominator
+  (it lowers recall; it never silently improves MRR either).
+- Undefined values: zero expected documents leaves Recall@K not evaluable —
+  callers must persist a missing score, never a zero.
 
-### MRR
+### MRR (implemented)
 
-Rewards retrieving the first relevant chunk near the top of the ranking.
+1 / (first rank at which any expected document appears after deduplication),
+0 when no expected document was retrieved (documented convention: no
+relevant hit is a failed ranking). Empty expected sets are not evaluable.
+
+A different granularity (e.g. chunk level) requires an explicit relevance
+remapping recorded with the run; stale chunk UUIDs are never treated as
+ground truth for another index revision.
 
 ### nDCG@K
 
@@ -97,3 +113,19 @@ OR estimated cost/query increases > 30% without a quality gain
 ```
 
 These values are project policy, not universal truth.
+
+### Implemented comparison mechanics (RB-19)
+
+Policies live in `eval_regression_policies` (`default-v1` seeded with the
+example thresholds above, under a persisted name). Each rule carries:
+metric direction (`higher`/`lower`), delta kind (`absolute`/`relative`),
+non-negative threshold, and the policy's stored quality-gain definition
+(efficiency regressions can be tolerated only while recall gained).
+Boundary semantics implemented and unit-tested:
+- strictly greater-than threshold regression (equal passes; 1e-9 epsilon);
+- relative delta at a zero baseline is undefined → rule `not_evaluable`;
+- missing aggregates keep their own `not_evaluable` state (never zero);
+- incomplete runs (query/evaluator failures) cannot produce a clean pass;
+- a quality regression is distinct from a pipeline/evaluator failure. The
+  compare endpoint only evaluates compatible pairs (dataset version, source
+  corpus checksums, scoring K, evaluator policy).

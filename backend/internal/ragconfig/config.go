@@ -37,22 +37,37 @@ var validRetrievalModes = map[string]bool{
 	RetrievalModeHybrid: true,
 }
 
+// Hybrid fusion validation bounds, mirrored by the CHECK constraints in
+// db/migrations/0014_hybrid_fusion_config.sql. Declared so no fusion
+// constant is a hidden magic number; keep the two in sync.
+const (
+	DefaultRRFConstant    = 60
+	MinRRFConstant        = 1
+	MaxRRFConstant        = 1000
+	DefaultCandidateLimit = 20
+	FusionMethodRRF       = "rrf"
+)
+
 // Config is one immutable saved configuration identity.
 type Config struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	ChunkSize           int       `json:"chunk_size"`
-	ChunkOverlap        int       `json:"chunk_overlap"`
-	RetrievalMode       string    `json:"retrieval_mode"`
-	TopK                int       `json:"top_k"`
-	RerankEnabled       bool      `json:"rerank_enabled"`
-	PromptVersion       string    `json:"prompt_version"`
-	ModelProfile        string    `json:"model_profile"`
-	EmbeddingProfile    string    `json:"embedding_profile"`
-	EmbeddingProvider   string    `json:"embedding_provider"`
-	EmbeddingModel      string    `json:"embedding_model"`
-	EmbeddingDimensions int       `json:"embedding_dimensions"`
-	CreatedAt           time.Time `json:"created_at"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	ChunkSize            int       `json:"chunk_size"`
+	ChunkOverlap         int       `json:"chunk_overlap"`
+	RetrievalMode        string    `json:"retrieval_mode"`
+	TopK                 int       `json:"top_k"`
+	RerankEnabled        bool      `json:"rerank_enabled"`
+	FusionMethod         string    `json:"fusion_method"`
+	RRFConstant          float64   `json:"rrf_rank_constant"`
+	FTSCandidateLimit    int       `json:"fts_candidate_limit"`
+	VectorCandidateLimit int       `json:"vector_candidate_limit"`
+	PromptVersion        string    `json:"prompt_version"`
+	ModelProfile         string    `json:"model_profile"`
+	EmbeddingProfile     string    `json:"embedding_profile"`
+	EmbeddingProvider    string    `json:"embedding_provider"`
+	EmbeddingModel       string    `json:"embedding_model"`
+	EmbeddingDimensions  int       `json:"embedding_dimensions"`
+	CreatedAt            time.Time `json:"created_at"`
 	// UnavailableCapabilities lists requested features the stack cannot
 	// execute yet; execution paths must reject them explicitly instead of
 	// silently degrading.
@@ -198,14 +213,11 @@ func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
 }
 
 // unavailableCapabilitiesFor lists capabilities requested by these settings
-// that the stack cannot execute yet: hybrid retrieval waits for RB-17,
-// reranking waits for RB-25.
+// that the stack cannot execute yet. Hybrid retrieval has executed since
+// RB-17 (deterministic RRF fusion); reranking waits for RB-25.
 func unavailableCapabilitiesFor(mode string, rerank bool) []string {
 	// Non-nil so the JSON field serializes as [] rather than null.
 	caps := []string{}
-	if mode == RetrievalModeHybrid {
-		caps = append(caps, "hybrid_retrieval")
-	}
 	if rerank {
 		caps = append(caps, "rerank")
 	}
@@ -217,9 +229,6 @@ func unavailableCapabilitiesFor(mode string, rerank bool) []string {
 // Query and evaluation pipelines must call this and reject the request with
 // a capability_unavailable error instead of degrading silently.
 func (c Config) ExecutionBlocker() error {
-	if c.RetrievalMode == RetrievalModeHybrid {
-		return &CapabilityUnavailableError{Capability: "hybrid_retrieval"}
-	}
 	if c.RerankEnabled {
 		return &CapabilityUnavailableError{Capability: "rerank"}
 	}

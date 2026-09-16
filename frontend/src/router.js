@@ -3,6 +3,8 @@ import OverviewView from './views/OverviewView.vue'
 import ComingSoonView from './views/ComingSoonView.vue'
 import LibraryView from './views/LibraryView.vue'
 import ChatView from './views/ChatView.vue'
+import EvaluationsView from './views/EvaluationsView.vue'
+import ExperimentsView from './views/ExperimentsView.vue'
 // Destinations whose owning stories have not landed yet route to
 // ComingSoonView, which states the owning stories explicitly and renders no
 // sample data or fake metrics.
@@ -28,13 +30,13 @@ const routes = [
   {
     path: '/evaluations',
     name: 'evaluations',
-    component: ComingSoonView,
+    component: EvaluationsView,
     meta: { title: 'Evaluations', story: 'RB-13–RB-16 (Sprint 4)' },
   },
   {
     path: '/experiments',
     name: 'experiments',
-    component: ComingSoonView,
+    component: ExperimentsView,
     meta: { title: 'Experiments', story: 'RB-17–RB-20 (Sprint 5)' },
   },
   {

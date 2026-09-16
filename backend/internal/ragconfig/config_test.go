@@ -162,10 +162,10 @@ func TestUnavailableCapabilitiesAndExecutionBlocker(t *testing.T) {
 		wantBlock bool
 	}{
 		{"vector no rerank is executable", RetrievalModeVector, false, nil, false},
-		{"hybrid is blocked", RetrievalModeHybrid, false, []string{"hybrid_retrieval"}, true},
+		{"hybrid is executable since RB-17", RetrievalModeHybrid, false, nil, false},
 		{"rerank is blocked", RetrievalModeVector, true, []string{"rerank"}, true},
-		{"hybrid plus rerank lists both", RetrievalModeHybrid, true,
-			[]string{"hybrid_retrieval", "rerank"}, true},
+		{"hybrid plus rerank blocks rerank", RetrievalModeHybrid, true,
+			[]string{"rerank"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

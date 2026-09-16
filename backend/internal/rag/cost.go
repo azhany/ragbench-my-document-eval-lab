@@ -101,7 +101,6 @@ func computeCost(embeddingProvider, embeddingModel string, embeddingTokens *int,
 	return costResult{Cost: &total, Currency: providers.PricingCurrency, PricingVersion: providers.PricingVersion, Components: components}
 }
 
-// perMillion prices tokens at an explicit per-million rate.
 func perMillion(tokens int, rate float64) float64 {
 	return round6(float64(tokens) * rate / 1_000_000)
 }
@@ -111,4 +110,46 @@ func round6(v float64) float64 {
 		return 0
 	}
 	return math.Round(v*1e6) / 1e6
+}
+
+// JudgeCostResult labels the evaluator-call cost components.
+type JudgeCostResult struct {
+	Cost           *float64
+	Currency       string
+	PricingVersion string
+	Components     CostComponents
+}
+
+// EvalJudgeCost prices one judge model call from explicit rates. Evaluator
+// cost is tracked separately from query cost; unreported usage or unpriced
+// models leave the cost null with its reason recorded, never zero.
+func EvalJudgeCost(provider, model string, inputTokens, outputTokens *int) JudgeCostResult {
+	if inputTokens == nil || outputTokens == nil {
+		return unavailableJudgeCost(reasonUsageUnavailable)
+	}
+	genRate, ok := providers.RateFor(provider, model)
+	if !ok {
+		return unavailableJudgeCost(reasonPricingUnavailable)
+	}
+	inputCost := perMillion(*inputTokens, genRate.InputPerMillion)
+	outputCost := perMillion(*outputTokens, genRate.OutputPerMillion)
+	total := round6(inputCost + outputCost)
+	components := CostComponents{
+		Available:        true,
+		Currency:         providers.PricingCurrency,
+		PricingVersion:   providers.PricingVersion,
+		GenerationInput:  &inputCost,
+		GenerationOutput: &outputCost,
+		Total:            &total,
+	}
+	return JudgeCostResult{Cost: &total, Currency: providers.PricingCurrency, PricingVersion: providers.PricingVersion, Components: components}
+}
+
+func unavailableJudgeCost(reason string) JudgeCostResult {
+	return JudgeCostResult{Components: CostComponents{
+		Available:      false,
+		Reason:         reason,
+		Currency:       providers.PricingCurrency,
+		PricingVersion: providers.PricingVersion,
+	}, PricingVersion: providers.PricingVersion}
 }

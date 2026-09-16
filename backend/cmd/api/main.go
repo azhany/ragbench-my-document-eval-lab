@@ -14,6 +14,9 @@ import (
 
 	"ragbench-my/backend/internal/config"
 	"ragbench-my/backend/internal/documents"
+	"ragbench-my/backend/internal/evaldata"
+	"ragbench-my/backend/internal/evalrun"
+	"ragbench-my/backend/internal/experiment"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
 	"ragbench-my/backend/internal/providers"
@@ -26,6 +29,10 @@ import (
 )
 
 const shutdownTimeout = 10 * time.Second
+
+// dispatchCreateTimeout bounds one experiment combination's launch step in
+// the orchestrator (run creation + Airflow dispatch).
+const dispatchCreateTimeout = 20 * time.Second
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -77,11 +84,35 @@ func run(logger *slog.Logger) error {
 		Generator: providerRouter,
 		Traces:    traceStore,
 	}
+	datasetStore := evaldata.NewStore(pool)
+	runStore := evalrun.NewStore(pool)
+	experimentStore := experiment.NewStore(pool)
+	orchestrator := &experiment.Orchestrator{
+		Store:         experimentStore,
+		Configs:       configStore,
+		ConfigCreator: configStore,
+		Datasets:      datasetStore,
+		Runner:        experimentRunner{runs: runStore, datasets: datasetStore, configs: configStore, dispatcher: newAirflowDispatch(cfg)},
+		Runs:          runStore,
+		IndexPlanner:  documents.NewIndexPlanner(pool),
+		IndexDispatch: documents.NewIndexDispatcher(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword, documents.NewStore(pool)),
+	}
 	handler := httpapi.NewFullAPI(logger,
 		configStore,
 		httpapi.DocumentOptions{Store: documents.NewStore(pool), Dispatcher: documents.NewAirflow(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword), UploadDir: cfg.UploadDir, MaxBytes: cfg.MaxUploadBytes},
 		chatPipeline,
 		traceStore,
+		httpapi.EvalOptions{
+			Datasets:     datasetStore,
+			Runs:         runStore,
+			Experiments:  experimentStore,
+			Orchestrator: orchestrator,
+			Dispatcher:   evalrun.NewAirflowDispatcher(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword),
+			Executor: &evalrun.Executor{
+				Store: runStore, Datasets: datasetStore,
+				Pipeline: chatPipeline, Judger: evalrun.RubricJudge{Generator: providerRouter},
+			},
+		},
 		health.NamedCheck{Name: "database", Check: pool.Ping},
 		health.NamedCheck{Name: "schema", Check: func(ctx context.Context) error {
 			return schema.Check(ctx, pool)
@@ -161,4 +192,49 @@ func logDatabaseState(ctx context.Context, logger *slog.Logger, pool *pgxpool.Po
 	logger.Info("application schema at expected migration version",
 		slog.Int("required_version", schema.RequiredVersion),
 	)
+}
+
+// newExperimentRunner adapts evalrun create/dispatch into the experiment
+// orchestrator's RunLauncher contract so a sweep's combination launches its
+// pinned durable eval run (RB-14 semantics), visible on partial failures.
+type experimentRunner struct {
+	runs       *evalrun.Store
+	datasets   *evaldata.Store
+	configs    *ragconfig.Store
+	dispatcher evalrun.Dispatcher
+}
+
+func (r experimentRunner) configReader() ragconfig.Store { return *r.configs }
+
+func (r experimentRunner) LaunchRun(parent context.Context, cfg ragconfig.Config, datasetID string, datasetVersion int, rubricVersion string, scoringK int) (evalrun.Run, error) {
+	ctx, cancel := context.WithTimeout(parent, dispatchCreateTimeout)
+	defer cancel()
+
+	run, err := r.runs.CreateRun(ctx, r.datasets, r.configs, evalrun.CreateRequest{
+		DatasetID: datasetID, DatasetVersion: datasetVersion, RagConfigID: cfg.ID,
+		RubricVersion: rubricVersion, ScoringK: scoringK,
+	})
+	if err != nil {
+		return evalrun.Run{}, err
+	}
+	if err := r.runs.MarkRunning(ctx, run.ID); err != nil {
+		return evalrun.Run{}, err
+	}
+	dagRun := evalrun.EvalDagRunID(run.ID)
+	dispatchErr := r.dispatcher.DispatchRun(ctx, run.ID)
+	if err := r.runs.RecordDispatch(ctx, run.ID, dagRun, dispatchErr); err != nil {
+		return evalrun.Run{}, err
+	}
+	combined, getErr := r.runs.GetRun(ctx, run.ID)
+	if getErr != nil {
+		return evalrun.Run{}, getErr
+	}
+	if combined.Status == evalrun.StatusDispatchFailed {
+		return combined, fmt.Errorf("%v: %s", evalrun.ErrDispatchFailed, combined.DispatchError)
+	}
+	return combined, nil
+}
+
+func newAirflowDispatch(cfg config.Config) evalrun.Dispatcher {
+	return evalrun.NewAirflowDispatcher(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword)
 }

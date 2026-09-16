@@ -119,39 +119,71 @@ creates a new configuration identity under a new name (migration
   changes; must stay compatible with `index_revisions`
 - created_at
 
-### eval_datasets
+### eval_datasets (implemented, `0009`/`0013`)
 - id UUID PK
-- name
-- version
+- name UNIQUE (1–200 chars)
+- description
+- latest_version 1–9999 (immutable numbered case versions)
 - created_at
 
-### eval_cases
+### eval_cases (implemented, `0009`/`0013`)
 - id UUID PK
 - dataset_id FK
-- question
-- reference_answer
-- expected_document_ids JSONB
-- expected_chunk_ids JSONB
+- version 1–9999, immutable per version (edits create a NEW version)
+- case_key UNIQUE per (dataset, version)
+- question, reference_answer
+- expected_evidence JSONB object `{document_ids[], labels[]}` — the stable
+  relevance unit is the document identity; chunk UUIDs are never treated as
+  ground truth for another index revision, so cross-chunk-size comparisons
+  stay valid without remapping
+- notes, created_at
 
-### eval_runs
+### eval_runs (implemented, `0010`)
 - id UUID PK
-- dataset_id FK
-- rag_config_id FK
-- baseline_run_id nullable
-- status
-- started_at
-- completed_at
-- aggregate_metrics JSONB
+- dataset_id FK + dataset_version (pinned at creation)
+- rag_config_id FK (immutable identity; hybrid since `0014`)
+- corpus_revisions JSONB (pinned snapshot of per-document active ready
+  revisions under the config's embedding identity; null revision entries
+  make a missing corpus diagnosable, never silently "ready")
+- evaluator_policy JSONB (policy version, rubric version, scoring K)
+- status created|running|completed|partial|failed|dispatch_failed
+  (dispatch failure is a visible failure, never success)
+- dag_run_id UNIQUE, dispatch_attempts, dispatch_error
+- created_at, updated_at
 
-### eval_results
+### eval_results (`0010`)
 - id UUID PK
-- eval_run_id FK
-- eval_case_id FK
-- answer
-- retrieved_chunk_ids JSONB
-- metrics JSONB
-- trace_id
-- created_at
+- run_id FK, eval_case_id (UNIQUE per run+case: idempotent retries store
+  exactly one terminal row)
+- case_key, dataset_version, status completed|failed|evaluator_failed
+- trace_id (public rag_traces.trace_id; every generated answer is traceable,
+  including classified failures)
+- query_error_code/message
+- recall_k, mrr (document-level, NULL = not evaluable, never zero)
+- answer_relevance/rationale, groundedness/rationale (versioned rubric
+  judge; judge failure is evaluator_failed, not a zero score)
+- citation_correct
+- evaluator input/output tokens and cost (`e.rag.EvalJudgeCost` explicit
+  rates) — tracked separately from query cost
+- operational copies: total/retrieval/generation latency, tokens, cost
+
+### eval_regression_policies (`0011`, RB-19)
+- id UUID PK, name + version UNIQUE (seeded `default-v1` in `0015`)
+- policy JSONB: per-metric {direction higher|lower, delta
+  absolute|relative, threshold ≥ 0}
+- quality_gain_definition TEXT (the stored exception wording)
+
+### experiments / experiment_combinations (`0012`, RB-18)
+- experiments: name UNIQUE, description, dataset_id+dataset_version,
+  rubric_version, scoring_k, requested_matrix JSONB (chunk sizes/overlaps,
+  top-k, retrieval mode, prompt version, model profile; rerank reserved to
+  RB-25), combination_limit 1–64 (explicit expansion cap), status
+  created|running|completed|partial|failed|dispatch_failed
+- experiment_combinations: deterministic settings JSONB (persisted before
+  execution), rag_config_id (created immutably per combination; retried
+  identities reused by deterministic name), index_dispatched/index_ready/
+  index_error (a failed reindex never evaluates against the wrong corpus),
+  eval_run_id, eval_run_error, cached eval_run_status
 
 ### rag_traces
 Migration `0007_rag_traces.sql` creates both tables and indexes their

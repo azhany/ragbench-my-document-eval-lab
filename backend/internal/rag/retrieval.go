@@ -1,7 +1,8 @@
 // Package rag owns the shared RAG query pipeline used by both normal chat
 // and (from Sprint 4) evaluation: question validation, query embedding,
-// pgvector retrieval with top-k truncation, versioned prompt construction,
-// grounded generation, citation mapping, and trace persistence.
+// retrieval (vector or hybrid with persisted fusion constants), versioned
+// prompt construction, grounded generation, citation mapping, and trace
+// persistence.
 //
 // Retrieval never mixes incompatible revisions: the searchable_chunks SQL
 // function restricts candidates to live documents' active ready revisions
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -69,7 +71,7 @@ func newError(code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
-// ValidationErrors carries one field-level violation for the chat request.
+// FieldError is one field-level violation for a validated pipeline request.
 type FieldError struct {
 	Field   string
 	Message string
@@ -89,7 +91,9 @@ func (e *ValidationErrors) Error() string {
 }
 
 // Evidence is one retrieved chunk with full evidence identity. Rank is
-// 1-based; Distance is pgvector cosine distance (lower is closer).
+// 1-based; Distance is pgvector cosine distance (lower is closer). Hybrid
+// results additionally carry their branch ranks and fused score so traces
+// and experiments reproduce the exact execution.
 type Evidence struct {
 	ChunkID    string  `json:"chunk_id"`
 	DocumentID string  `json:"document_id"`
@@ -98,9 +102,13 @@ type Evidence struct {
 	Content    string  `json:"content"`
 	Distance   float64 `json:"distance"`
 	Rank       int     `json:"rank"`
+	VectorRank int     `json:"vector_rank,omitempty"`
+	FTSRank    int     `json:"fts_rank,omitempty"`
+	Score      float64 `json:"fusion_score,omitempty"`
 }
 
-// Retriever executes vector retrieval against the searchable_chunks boundary.
+// Retriever executes retrieval against the searchable_chunks boundary: the
+// pgvector path (RB-09) or the deterministic hybrid fusion (RB-17).
 type Retriever struct {
 	pool *pgxpool.Pool
 }
@@ -135,6 +143,18 @@ const retrievalQuery384 = `
 	         c.document_id ASC, c.index_revision_id ASC, c.id ASC
 	LIMIT $3`
 
+// FTSEmptyNote documents FTS empty-branch behavior: a question with no
+// lexical match contributes an empty branch; fusion proceeds with the other
+// branch's candidates only (deterministically), and both-empty stays
+// retrieval_empty.
+const ftsQuery = `
+	SELECT c.id, c.document_id, c.index_revision_id, c.chunk_index, c.content
+	FROM searchable_chunks($1::uuid) c
+	WHERE websearch_to_tsquery('english', $2) @@ to_tsvector('english', c.content)
+	ORDER BY ts_rank_cd(to_tsvector('english', c.content), websearch_to_tsquery('english', $2)) DESC,
+	         c.chunk_index ASC, c.document_id ASC, c.index_revision_id ASC, c.id ASC
+	LIMIT $3`
+
 // boundaryExists reports whether any live document currently has an active
 // ready revision compatible with the configuration's embedding identity.
 const boundaryExistsQuery = `
@@ -150,13 +170,19 @@ const boundaryExistsQuery = `
 		  AND r.embedding_dimensions = cfg.embedding_dimensions
 	)`
 
-// Retrieve returns the top-k most relevant chunks for the query vector,
-// ordered by cosine distance. An empty result is classified: a missing
-// retrieval boundary (nothing indexed, everything deleted, or an embedding
-// mismatch) is revision_unavailable; a boundary with chunks but no usable
-// evidence stays retrieval_empty. Stage duration is returned so callers can
-// persist it as a span.
-func (r *Retriever) Retrieve(ctx context.Context, cfg ragconfig.Config, vector []float32) ([]Evidence, int64, *Error) {
+// Retrieve executes the pinned retrieval mode for the question: pure
+// pgvector top-k for vector mode, or a deterministic hybrid fusion (RB-17)
+// for hybrid mode. Empty results classify as in vector mode. Stage duration
+// is returned so callers can persist it as a span.
+func (r *Retriever) Retrieve(ctx context.Context, cfg ragconfig.Config, question string, vector []float32) ([]Evidence, int64, *Error) {
+	if cfg.RetrievalMode == ragconfig.RetrievalModeHybrid {
+		return r.hybrid(ctx, cfg, question, vector)
+	}
+	return r.vector(ctx, cfg, vector)
+}
+
+// vector executes the plain pgvector path (RB-09 semantics, unchanged).
+func (r *Retriever) vector(ctx context.Context, cfg ragconfig.Config, vector []float32) ([]Evidence, int64, *Error) {
 	start := time.Now()
 	query := retrievalQuery
 	switch cfg.EmbeddingDimensions {
@@ -184,20 +210,170 @@ func (r *Retriever) Retrieve(ctx context.Context, cfg ragconfig.Config, vector [
 		return nil, 0, newError(ErrCodeRetrievalFailed, "read retrieved evidence: %v", err)
 	}
 
-	if len(evidence) == 0 {
-		var exists bool
-		if err := r.pool.QueryRow(ctx, boundaryExistsQuery, cfg.ID).Scan(&exists); err != nil {
-			return nil, 0, newError(ErrCodeRetrievalFailed, "check retrieval boundary: %v", err)
+	return evidence, elapsedMS(start), classifiedBoundary(r, ctx, cfg, len(evidence), elapsedMS(start))
+}
+
+// classifiedBoundary turns an empty pgvector result into its classified
+// outcome, or nil when evidence exists.
+func classifiedBoundary(r *Retriever, ctx context.Context, cfg ragconfig.Config, count int, elapsed int64) *Error {
+	if count > 0 {
+		return nil
+	}
+	var exists bool
+	if err := r.pool.QueryRow(ctx, boundaryExistsQuery, cfg.ID).Scan(&exists); err != nil {
+		return newError(ErrCodeRetrievalFailed, "check retrieval boundary: %v", err)
+	}
+	if !exists {
+		return newError(ErrCodeRevisionUnavailable,
+			"no live document has an active ready revision compatible with this configuration's embedding identity (%s/%s/%d dimensions); process documents or reindex them with this configuration",
+			cfg.EmbeddingProvider, cfg.EmbeddingModel, cfg.EmbeddingDimensions)
+	}
+	return newError(ErrCodeRetrievalEmpty,
+		"retrieval returned no usable evidence for this question; refusing to generate an unsupported answer")
+}
+
+// hybrid retrieves both branches independently and fuses the two candidate
+// lists with the persisted RRF constants. Callers record the fusion settings
+// with the trace (retrieval span metadata) so an experiment reproduces the
+// same execution. Top-k truncation applies AFTER the merge.
+func (r *Retriever) hybrid(ctx context.Context, cfg ragconfig.Config, question string, vector []float32) ([]Evidence, int64, *Error) {
+	start := time.Now()
+
+	vectorEvidence, _, vErr := r.vectorBranch(ctx, cfg, vector)
+	if vErr != nil {
+		return nil, 0, vErr
+	}
+	ftsEvidence, _, fErr := r.ftsBranch(ctx, cfg, question)
+	if fErr != nil {
+		return nil, 0, fErr
+	}
+
+	fused := fuseHybrid(vectorEvidence, ftsEvidence, cfg.RRFConstant, cfg.TopK)
+	return fused, elapsedMS(start), classifiedBoundary(r, ctx, cfg, len(fused), elapsedMS(start))
+}
+
+// vectorBranch fetches the vector branch candidates (top vector limit).
+func (r *Retriever) vectorBranch(ctx context.Context, cfg ragconfig.Config, vector []float32) ([]Evidence, int64, *Error) {
+	branch := cfg
+	branch.TopK = cfg.VectorCandidateLimit
+	return r.vector(ctx, branch, vector)
+}
+
+// ftsBranch fetches the full-text candidates ordered by ts_rank_cd with the
+// same deterministic identity tiebreakers, top fts limit.
+func (r *Retriever) ftsBranch(ctx context.Context, cfg ragconfig.Config, question string) ([]Evidence, int64, *Error) {
+	start := time.Now()
+	rows, err := r.pool.Query(ctx, ftsQuery, cfg.ID, question, cfg.FTSCandidateLimit)
+	if err != nil {
+		return nil, 0, classifyRetrievalQuery(err)
+	}
+	defer rows.Close()
+	evidence := []Evidence{}
+	for rows.Next() {
+		var e Evidence
+		if err := rows.Scan(&e.ChunkID, &e.DocumentID, &e.RevisionID, &e.ChunkIndex, &e.Content); err != nil {
+			return nil, 0, newError(ErrCodeRetrievalFailed, "read fts candidates: %v", err)
 		}
-		if !exists {
-			return nil, elapsedMS(start), newError(ErrCodeRevisionUnavailable,
-				"no live document has an active ready revision compatible with this configuration's embedding identity (%s/%s/%d dimensions); process documents or reindex them with this configuration",
-				cfg.EmbeddingProvider, cfg.EmbeddingModel, cfg.EmbeddingDimensions)
-		}
-		return nil, elapsedMS(start), newError(ErrCodeRetrievalEmpty,
-			"retrieval returned no usable evidence for this question; refusing to generate an unsupported answer")
+		evidence = append(evidence, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, newError(ErrCodeRetrievalFailed, "read fts candidates: %v", err)
 	}
 	return evidence, elapsedMS(start), nil
+}
+
+// fuseHybrid is the deterministic RRF merge documented for RB-17, pure and
+// unit-testable:
+//   - deduplication: a chunk appears once regardless of how many branches hit;
+//   - score = Σ_branch 1/(k + rank_branch) (missing branch contributes 0);
+//   - ordering: score DESC, then vector-present before FTS-only, then
+//     distance ASC, then immutable chunk identity (document, revision,
+//     chunk index, id);
+//   - top-k truncation happens AFTER the merge.
+func fuseHybrid(vectorBranch, ftsBranch []Evidence, rrfConstant float64, topK int) []Evidence {
+	type state struct {
+		e      Evidence
+		vRank  int
+		fRank  int
+		score  float64
+		hasVec bool
+		hasFTS bool
+	}
+	byKey := map[string]*state{}
+	keys := []string{}
+	slot := func(chunkID string, e Evidence) *state {
+		s, ok := byKey[chunkID]
+		if !ok {
+			s = &state{e: Evidence{
+				ChunkID:    e.ChunkID,
+				DocumentID: e.DocumentID,
+				RevisionID: e.RevisionID,
+				ChunkIndex: e.ChunkIndex,
+				Content:    e.Content,
+				Distance:   e.Distance,
+			}}
+			byKey[chunkID] = s
+			keys = append(keys, chunkID)
+		}
+		return s
+	}
+	for i, e := range vectorBranch {
+		s := slot(e.ChunkID, e)
+		if !s.hasVec {
+			s.hasVec = true
+			s.vRank = i + 1
+			s.score += 1.0 / (rrfConstant + float64(s.vRank))
+		}
+	}
+	for i, e := range ftsBranch {
+		s := slot(e.ChunkID, e)
+		if !s.hasFTS {
+			s.hasFTS = true
+			s.fRank = i + 1
+			s.score += 1.0 / (rrfConstant + float64(s.fRank))
+		}
+	}
+
+	out := make([]Evidence, 0, len(keys))
+	for _, key := range keys {
+		s := byKey[key]
+		e := s.e
+		e.Score = s.score
+		e.VectorRank = s.vRank
+		e.FTSRank = s.fRank
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Score != b.Score {
+			return a.Score > b.Score
+		}
+		aVec, bVec := a.VectorRank > 0, b.VectorRank > 0
+		if aVec != bVec {
+			return aVec // vector-scored evidence precedes FTS-only on ties
+		}
+		if a.Distance != b.Distance {
+			return a.Distance < b.Distance
+		}
+		// Immutable identity tiebreaks: document, revision, chunk index, id.
+		if a.DocumentID != b.DocumentID {
+			return a.DocumentID < b.DocumentID
+		}
+		if a.RevisionID != b.RevisionID {
+			return a.RevisionID < b.RevisionID
+		}
+		if a.ChunkIndex != b.ChunkIndex {
+			return a.ChunkIndex < b.ChunkIndex
+		}
+		return a.ChunkID < b.ChunkID
+	})
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	for i := range out {
+		out[i].Rank = i + 1
+	}
+	return out
 }
 
 func classifyRetrievalQuery(err error) *Error {
@@ -222,7 +398,7 @@ func vectorLiteral(vector []float32) string {
 
 func elapsedMS(start time.Time) int64 { return time.Since(start).Milliseconds() }
 
-// EmbedQuery embeds one question under the configuration's persisted
+// EmbedQuestion embeds one question under the configuration's persisted
 // embedding identity and validates the provider response shape.
 func EmbedQuestion(ctx context.Context, cfg ragconfig.Config, embedder providers.Embedder, question string) ([]float32, *int, *Error) {
 	profile := providers.EmbeddingProfile{
@@ -239,13 +415,13 @@ func EmbedQuestion(ctx context.Context, cfg ragconfig.Config, embedder providers
 		return nil, nil, &Error{Code: providers.ErrCodeEmbeddingFailed,
 			Message: fmt.Sprintf("query embedding returned %d vectors for 1 question", len(result.Vectors))}
 	}
-	vector := result.Vectors[0]
-	if len(vector) != cfg.EmbeddingDimensions {
+	queryVector := result.Vectors[0]
+	if len(queryVector) != cfg.EmbeddingDimensions {
 		return nil, nil, &Error{Code: providers.ErrCodeEmbeddingFailed,
 			Message: fmt.Sprintf("query embedding dimensions must equal %d", cfg.EmbeddingDimensions)}
 	}
 	nonzero := false
-	for _, value := range vector {
+	for _, value := range queryVector {
 		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
 			return nil, nil, &Error{Code: providers.ErrCodeEmbeddingFailed,
 				Message: "query embedding returned invalid vector values"}
@@ -258,7 +434,7 @@ func EmbedQuestion(ctx context.Context, cfg ragconfig.Config, embedder providers
 		return nil, nil, &Error{Code: providers.ErrCodeEmbeddingFailed,
 			Message: "query embedding returned a zero vector, unusable for cosine search"}
 	}
-	return vector, result.PromptTokens, nil
+	return queryVector, result.PromptTokens, nil
 }
 
 // wrapProviderError converts a providers.ProviderError into the pipeline's

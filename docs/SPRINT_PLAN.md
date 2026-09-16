@@ -1,6 +1,6 @@
 # Sprint Plan and Implementation Stories
 
-Status: implementation in progress. Story files record current completion and outstanding verification gates.
+Status: implementation in progress. Story files record current completion and outstanding verification gates. Sprints 1–3 are implemented (with recorded open real-provider/browser gates); Sprint 4 (RB-13–RB-16) and Sprint 5 (RB-17–RB-20) are implemented with unit + PostgreSQL integration tests passing and a live API smoke; the remaining open gates are the real-provider runs (golden dataset scoring run, hybrid-vs-vector run, live sweep browser verification) recorded in each story file.
 
 ## 1. Baseline and planning assumptions
 

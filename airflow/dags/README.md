@@ -36,9 +36,15 @@ task in Airflow is also idempotent while that revision is still latest; a later
 revision or deletion fences off the old task. Parser/chunk changes that alter
 existing chunk evidence fail with `revision_conflict` instead of overwriting it.
 
-Future DAGs:
+Implemented since Sprint 4/5 (orchestration only — evaluation logic lives in
+`ragbench/evaluation.py`, which just calls the Go API; Python never
+duplicates retrieval, prompt construction, generation or scoring logic):
 
-- `rag_evaluation`
-- `rag_parameter_sweep`
+- `rag_evaluation` (RB-14): conf `{"run_id": UUID}`; drives case execution
+  through the Go API per case (idempotent per run+case) then re-computes the
+  aggregate run status via finalize. Two tasks: `cases`, `finalize`.
+- `rag_parameter_sweep` (RB-18): conf `{"experiment_id": UUID}`; performs one
+  idempotent `advance` step per call until the experiment is terminal; a
+  failed terminal state is surfaced as task failure.
 
 Keep DAGs orchestration-focused. Put reusable evaluation logic in importable Python modules rather than embedding everything in DAG definitions.

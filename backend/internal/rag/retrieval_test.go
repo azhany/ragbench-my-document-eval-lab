@@ -121,7 +121,7 @@ func TestRetrieveRanksTiesAndCapsTopK(t *testing.T) {
 	secondDoc, _ := insertDocumentRevision(t, pool, cfg, true, false, cfg.EmbeddingProvider, cfg.EmbeddingModel,
 		vector1536(1, 0))
 
-	evidence, _, err := retriever.Retrieve(context.Background(), cfg, query)
+	evidence, _, err := retriever.Retrieve(context.Background(), cfg, "test question", query)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestRetrieveExcludesDeletedNonActiveAndIncompatibleRevisions(t *testing.T) 
 	_ = oldRev
 
 	cfg.TopK = 100
-	evidence, _, err := retriever.Retrieve(context.Background(), cfg, query)
+	evidence, _, err := retriever.Retrieve(context.Background(), cfg, "test question", query)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -176,14 +176,14 @@ func TestRetrieveDistinguishesEmptyFromUnavailableBoundary(t *testing.T) {
 	retriever, pool, cfg := testRetrieval(t)
 	query := vector1536(1, 0)
 
-	_, _, err := retriever.Retrieve(context.Background(), cfg, query)
+	_, _, err := retriever.Retrieve(context.Background(), cfg, "test question", query)
 	var rerr *Error
 	if !errors.As(err, &rerr) || rerr.Code != ErrCodeRevisionUnavailable {
 		t.Fatalf("empty corpus: want revision_unavailable, got %v", err)
 	}
 
 	insertDocumentRevision(t, pool, cfg, true, false, cfg.EmbeddingProvider, cfg.EmbeddingModel, nil)
-	_, _, err = retriever.Retrieve(context.Background(), cfg, query)
+	_, _, err = retriever.Retrieve(context.Background(), cfg, "test question", query)
 	if !errors.As(err, &rerr) || rerr.Code != ErrCodeRetrievalEmpty {
 		t.Fatalf("ready boundary with no usable vectors: want retrieval_empty, got %v", err)
 	}
@@ -192,7 +192,7 @@ func TestRetrieveDistinguishesEmptyFromUnavailableBoundary(t *testing.T) {
 func TestRetrieveStageTimingIsNonNegative(t *testing.T) {
 	retriever, pool, cfg := testRetrieval(t)
 	insertDocumentRevision(t, pool, cfg, true, false, cfg.EmbeddingProvider, cfg.EmbeddingModel, vector1536(1, 0))
-	_, duration, err := retriever.Retrieve(context.Background(), cfg, vector1536(1, 0))
+	_, duration, err := retriever.Retrieve(context.Background(), cfg, "q", vector1536(1, 0))
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestRetrieveSupportsHuggingFaceNativeDimensions(t *testing.T) {
 	}
 	insertDocumentRevision(t, pool, cfg, true, false, cfg.EmbeddingProvider, cfg.EmbeddingModel,
 		vector384(1, 0), vector384(0, 1))
-	evidence, _, retrievalErr := NewRetriever(pool).Retrieve(context.Background(), cfg, vector384(1, 0))
+	evidence, _, retrievalErr := NewRetriever(pool).Retrieve(context.Background(), cfg, "q", vector384(1, 0))
 	if retrievalErr != nil || len(evidence) != 2 || evidence[0].Distance != 0 {
 		t.Fatalf("384d retrieval = %+v, %v", evidence, retrievalErr)
 	}

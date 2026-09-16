@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"ragbench-my/backend/internal/evalrun"
+	"ragbench-my/backend/internal/experiment"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/rag"
 )
@@ -19,24 +21,49 @@ type server struct {
 	documents    DocumentOptions
 	chatPipeline *rag.Pipeline
 	traces       TracesStore
+	datasets     DatasetStore
+	runs         EvalRunStore
+	experiments  ExperimentStore
+	orchestrator *experiment.Orchestrator
+	dispatcher   evalrun.Dispatcher
+	executor     *evalrun.Executor
 }
 
 func NewDocumentAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, readinessChecks ...health.NamedCheck) http.Handler {
-	return newAPI(logger, configs, opts, nil, nil, readinessChecks...)
+	return newAPI(logger, configs, opts, nil, nil, EvalOptions{}, readinessChecks...)
 }
 
 // New wires configs and health only: no chat pipeline, traces, or document store.
 func New(logger *slog.Logger, configs ConfigStore, readinessChecks ...health.NamedCheck) http.Handler {
-	return newAPI(logger, configs, DocumentOptions{}, nil, nil, readinessChecks...)
+	return newAPI(logger, configs, DocumentOptions{}, nil, nil, EvalOptions{}, readinessChecks...)
 }
 
 // NewFullAPI wires every implemented resource, including chat and traces.
-func NewFullAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, readinessChecks ...health.NamedCheck) http.Handler {
-	return newAPI(logger, configs, opts, chatPipeline, traces, readinessChecks...)
+func NewFullAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, eval EvalOptions, readinessChecks ...health.NamedCheck) http.Handler {
+	return newAPI(logger, configs, opts, chatPipeline, traces, eval, readinessChecks...)
 }
 
-func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, readinessChecks ...health.NamedCheck) http.Handler {
-	s := &server{logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces}
+// EvalOptions carries the Sprint 4/5 evaluation dependencies. All fields are
+// optional; a route is only registered when its store is wired.
+type EvalOptions struct {
+	Datasets    DatasetStore
+	Runs        EvalRunStore
+	Experiments ExperimentStore
+
+	// Orchestrator executes RB-18's persisted experiment state machine.
+	Orchestrator *experiment.Orchestrator
+
+	// Dispatcher triggers the evaluation DAG; Executor runs cases through
+	// the shared pipeline and persists scores.
+	Dispatcher evalrun.Dispatcher
+	Executor   *evalrun.Executor
+}
+
+func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, eval EvalOptions, readinessChecks ...health.NamedCheck) http.Handler {
+	s := &server{logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces,
+		datasets: eval.Datasets, runs: eval.Runs, experiments: eval.Experiments,
+		dispatcher: eval.Dispatcher, executor: eval.Executor}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", rootHandler)
@@ -60,6 +87,27 @@ func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chat
 		mux.HandleFunc("POST /api/v1/documents/{id}/reprocess", s.reprocessDocument)
 		mux.HandleFunc("DELETE /api/v1/documents/{id}", s.deleteDocument)
 	}
+	if eval.Datasets != nil {
+		mux.HandleFunc("POST /api/v1/eval-datasets", s.createDataset)
+		mux.HandleFunc("GET /api/v1/eval-datasets", s.listDatasets)
+		mux.HandleFunc("GET /api/v1/eval-datasets/{id}", s.getDataset)
+		mux.HandleFunc("POST /api/v1/eval-datasets/{id}/cases", s.newDatasetVersion)
+	}
+	if eval.Runs != nil {
+		mux.HandleFunc("POST /api/v1/eval-runs", s.createEvalRun)
+		mux.HandleFunc("GET /api/v1/eval-runs", s.listEvalRuns)
+		mux.HandleFunc("GET /api/v1/eval-runs/{id}", s.getEvalRun)
+		mux.HandleFunc("GET /api/v1/eval-runs/{id}/results", s.listEvalResults)
+		mux.HandleFunc("POST /api/v1/eval-runs/{id}/cases/{caseId}/execute", s.executeEvalCase)
+		mux.HandleFunc("POST /api/v1/eval-runs/{id}/finalize", s.finalizeEvalRun)
+		mux.HandleFunc("GET /api/v1/eval-runs/{id}/compare/{baselineId}", s.compareEvalRun)
+	}
+	if eval.Experiments != nil {
+		mux.HandleFunc("POST /api/v1/experiments", s.createExperiment)
+		mux.HandleFunc("GET /api/v1/experiments", s.listExperiments)
+		mux.HandleFunc("GET /api/v1/experiments/{id}", s.getExperiment)
+		mux.HandleFunc("POST /api/v1/experiments/{id}/advance", s.advanceExperiment)
+	}
 
 	return logMiddleware(logger, mux)
 }
@@ -74,7 +122,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, serviceInfo{
 		Service:   ServiceName,
 		Status:    "ok",
-		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/chat", "/api/v1/traces"},
+		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments"},
 	})
 }
 

@@ -1,0 +1,22 @@
+RM-01 Federal Cost Management Guidelines
+========================================
+
+Section 1: Approval workflow.
+Every ministry expenditure request must receive (1) technical review by the
+division cost officer, (2) certification by the head of finance, and (3)
+counter-signature by the controlling officer before commitment. Requests above
+RM 500,000 additionally require the ministry tender board to convene within
+five working days of technical review.
+
+Section 2: Annual budget submission.
+Ministries submit their annual budget estimates two months before fiscal year
+start. Late submissions are returned once for correction and thereafter
+escalated to the controlling officer.
+
+Section 3: Procurement thresholds.
+Direct purchase is permitted up to RM 5,000. Quotations (minimum three) are
+required between RM 5,000 and RM 100,000. Above RM 100,000 open tender applies.
+
+Section 4: Emergency procurement.
+Emergency procurement may bypass open tender with written justification, but
+must be reported to the audit committee within 14 days of commitment.

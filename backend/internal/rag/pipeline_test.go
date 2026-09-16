@@ -67,7 +67,7 @@ type fakeRetriever struct {
 	calls    int
 }
 
-func (f *fakeRetriever) Retrieve(ctx context.Context, cfg ragconfig.Config, vector []float32) ([]Evidence, int64, *Error) {
+func (f *fakeRetriever) Retrieve(ctx context.Context, cfg ragconfig.Config, question string, vector []float32) ([]Evidence, int64, *Error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.ms, f.err
@@ -306,17 +306,31 @@ func TestAskUnknownConfigDistinctError(t *testing.T) {
 
 func TestAskCapabilityUnavailable(t *testing.T) {
 	traces := &fakeTraces{}
-	p := newPipeline(okEmbedder(1), &fakeRetriever{}, okGenerator("x"), traces)
-	capConfig := testConfig
-	capConfig.RetrievalMode = "hybrid"
-	p.Configs = &fakeConfigs{config: capConfig}
+	p := newPipeline(okEmbedder(1), &fakeRetriever{}, okGenerator("x [1]"), traces)
 
-	_, err := p.Ask(context.Background(), ChatRequest{Question: "q", ConfigID: capConfig.ID})
+	// Hybrid executes normally since RB-17 (same pipeline, retrieval mode
+	// actually selects the hybrid branch inside the retriever).
+	hybridConfig := testConfig
+	hybridConfig.RetrievalMode = "hybrid"
+	p.Configs = &fakeConfigs{config: hybridConfig}
+	_, err := p.Ask(context.Background(), ChatRequest{Question: "q", ConfigID: hybridConfig.ID})
+	var herr *Error
+	if !errors.As(err, &herr) || herr.Code == ErrCodeCapabilityUnavailable {
+		t.Fatalf("hybrid must not be a capability rejection; got %v", err)
+	}
+
+	// Rerank stays reserved for RB-25: rejection happens before any provider
+	// call and produces no trace.
+	rerankConfig := testConfig
+	rerankConfig.RerankEnabled = true
+	p.Configs = &fakeConfigs{config: rerankConfig}
+	tracesBefore := len(traces.records)
+	_, err = p.Ask(context.Background(), ChatRequest{Question: "q", ConfigID: rerankConfig.ID})
 	var rerr *Error
 	if !errors.As(err, &rerr) || rerr.Code != ErrCodeCapabilityUnavailable {
 		t.Fatalf("want capability_unavailable, got %v", err)
 	}
-	if len(traces.records) != 0 {
+	if len(traces.records) != tracesBefore {
 		t.Fatal("capability rejections must not produce traces")
 	}
 }

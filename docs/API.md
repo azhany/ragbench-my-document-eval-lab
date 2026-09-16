@@ -410,17 +410,105 @@ before the failing stage; early embedding/retrieval failures have empty
 snapshots. A trace write failure is returned as `persistence_failed` and
 cannot look like a successful trace.
 
-## Evaluation
+## Evaluation (RB-13–RB-16, RB-18–RB-20 implemented)
 
-`POST /api/v1/eval-runs`
+### `POST /api/v1/eval-datasets` (RB-13)
+Import a dataset: immutable version 1 with reviewed cases.
 
-`GET /api/v1/eval-runs`
+```json
+{
+  "name": "golden-dataset-v1",
+  "description": "…",
+  "cases": [
+    {
+      "case_key": "qa-001",
+      "question": "…",
+      "reference_answer": "…",
+      "expected_evidence": [{"document_id": "<uuid>", "label": "<source name>"}],
+      "notes": ""
+    }
+  ]
+}
+```
 
-`GET /api/v1/eval-runs/{id}`
+`201 Created` → dataset JSON (`id`, `name`, `description`, `latest_version`,
+`created_at`). Errors:
+- `409 name_conflict` — the dataset name is unique.
+- `422 invalid_dataset` / `422 invalid_reference` — empty versions, invalid
+  references (unknown/deleted/malformed document ids) are rejected, never
+  stored; duplicate case_key is `400 duplicate_case_key`.
 
-`GET /api/v1/eval-runs/{id}/results`
+### `GET /api/v1/eval-datasets`
+`{"datasets": [...], "fields": same as 201}`.
 
-`GET /api/v1/eval-runs/{id}/compare/{baselineId}`
+### `GET /api/v1/eval-datasets/{id}?version=N`
+`{"dataset_id", "version", "cases": [...]}` — one immutable version's
+reviewed cases (version omitted = latest; out-of-range = `422`).
+
+### `POST /api/v1/eval-datasets/{id}/cases` (RB-13 versioned edit)
+Replace the case set; creates immutable version N+1 (`201`). Old runs keep
+their original cases; the same validation errors apply.
+
+### `POST /api/v1/eval-runs` (RB-14)
+Launch a dataset version against a named config through the shared Go query
+pipeline with evaluation attribution.
+
+```json
+{"dataset_id": "<uuid>", "dataset_version": 0, "rag_config_id": "<uuid>",
+ "rubric_version": "rubric-v1", "scoring_k": 5}
+```
+
+`201 Created` (dispatched) or `202 Accepted` with `status
+dispatch_failed` + `dispatch_error` — Airflow dispatch failure is a visible
+run failure, never successful processing. Inputs are pinned at creation:
+dataset version, immutable config identity, per-document corpus revision
+snapshot, evaluator policy. Unknown rubric/dataset versions and blocked
+configs are `422 invalid_run`.
+
+### `GET /api/v1/eval-runs`, `GET /api/v1/eval-runs/{id}`
+List (newest first) / detail. Detail includes the pinned inputs and a
+computed `aggregate` with explicit denominators: `recall_count`,
+`recall_mean`, `mrr_*`, rubric means with counts, `latency_population`,
+`latency_p50_ms`, `latency_p95_ms`, `cost_population`, `cost_total`,
+`completed`, `query_failed`, `evaluator_failed`, `missing_score_cases`.
+Missing values are null — never zero — and status distinguishes
+completed/partial/failed work.
+
+### `GET /api/v1/eval-runs/{id}/results`
+Per-case rows: `case_key`, `status` (completed|failed|evaluator_failed),
+`trace_id`, `query_error_code/message`, `recall_k`, `mrr`, rubric scores
+with verbatim rationales, `citation_correct`, evaluator tokens/cost, latency
+and cost copies. `NULL` scores mean not evaluable, never zero quality.
+
+### `POST /api/v1/eval-runs/{id}/cases/{caseId}/execute`
+Runs one case through the same pipeline as chat (`request_type=evaluation`).
+Idempotent: a stored terminal result is returned unchanged.
+
+### `POST /api/v1/eval-runs/{id}/finalize`
+Recomputes aggregate run status from persisted results (DAG + recovery).
+
+### `GET /api/v1/eval-runs/{id}/compare/{baselineId}?policy=default-v1` (RB-19)
+Compares only compatible pairs (same dataset version, source corpus, scoring
+K, evaluator policy; differing chunk settings allowed via the document
+relevance unit). Response: `policy` (persisted rules + stored quality-gain
+definition), `compatibility` with reasons, and a `verdict` — per-rule
+baseline/candidate values, absolute/relative deltas, direction, threshold
+and `passed|regression|not_evaluable|gain_exception` with reasons. Strictly
+greater-than threshold semantics; zero-baseline relative deltas are
+undefined (`not_evaluable`); incomplete runs are never a clean pass; a
+quality regression stays distinct from a pipeline or evaluator failure.
+
+### Experiments (RB-18)
+- `POST /api/v1/experiments` — persisted matrix expansion before execution
+  with an explicit `combination_limit` (1–64); every combination resolves as
+  a valid immutable config identity up front; the rerank dimension is
+  rejected (`422 invalid_experiment`) until RB-25 rather than implied.
+- `GET /api/v1/experiments`, `GET /api/v1/experiments/{id}`
+- `POST /api/v1/experiments/{id}/advance` — one idempotent orchestration
+  step (the `rag_parameter_sweep` DAG drives it until terminal); chunk/
+  embedding changes resolve through `document_reindex` first, and a failed
+  reindex keeps that combination unevaluated. Retries reuse created
+  identities; partial matrix failures retain successful run links.
 
 ## Monitoring
 

@@ -101,6 +101,61 @@ func PromptByVersion(version string) (Prompt, error) {
 	return prompt, nil
 }
 
+// Rubric is a versioned evaluation judge rubric (RB-15). The version is the
+// identity stored with eval runs; JudgeProvider/JudgeModel pin the judge
+// model used when scoring. Template receives the case context and must
+// return the documented JSON judgment; the judge model renders the answer.
+type Rubric struct {
+	Version       string
+	Identifier    string
+	JudgeProvider string
+	JudgeModel    string
+	Template      string
+}
+
+var rubrics = map[string]Rubric{
+	"rubric-v1": {
+		Version:       "rubric-v1",
+		Identifier:    "relevance-groundedness-1-5",
+		JudgeProvider: "openai",
+		JudgeModel:    "gpt-4o-mini",
+		Template: `You are a strict evaluator scoring a RAG system's answer.
+
+Score the ANSWER on answer relevance: does it directly address the QUESTION
+(1 = unrelated, 5 = complete and on point)?
+
+Score the ANSWER on groundedness: are its claims supported by the numbered
+EVIDENCE the system retrieved (1 = unsupported, 5 = fully supported by
+evidence)? Outside knowledge in the answer lowers this score.
+
+Reply with exactly one JSON object, no other text:
+{"answer_relevance": {"score": <1-5>, "rationale": "<one concise sentence>"},
+ "groundedness":    {"score": <1-5>, "rationale": "<one concise sentence>"}}
+
+QUESTION:
+{{QUESTION}}
+
+REFERENCE ANSWER (context only; do not copy):
+{{REFERENCE_ANSWER}}
+
+ANSWER:
+{{ANSWER}}
+
+EVIDENCE retrieved by the system:
+{{CITED_EVIDENCE}}`,
+	},
+}
+
+// RubricByVersion returns the registered judge rubric with the given version,
+// or an error naming the unknown rubric.
+func RubricByVersion(version string) (Rubric, error) {
+	rubric, ok := rubrics[version]
+	if !ok {
+		return Rubric{}, fmt.Errorf("unknown rubric version %q", version)
+	}
+	return rubric, nil
+}
+
 // PricingVersion labels the explicit rate table below. Changing a rate is a
 // new pricing version: stored traces keep the version that priced them, so
 // cost comparisons never silently mix rates.
@@ -156,3 +211,11 @@ Question:
 
 Evidence:
 {{EVIDENCE}}`
+
+// DefaultRubricVersion and its judge identity are exported so evaluation
+// callers persist and price the judge call from one explicit source.
+const (
+	DefaultRubricVersion = "rubric-v1"
+	RubricJudgeProvider  = "openai"
+	RubricJudgeModel     = "gpt-4o-mini"
+)

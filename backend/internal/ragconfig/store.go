@@ -24,7 +24,9 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const configColumns = `id, name, chunk_size, chunk_overlap, retrieval_mode, top_k,
-	rerank_enabled, prompt_version, model_profile, embedding_profile,
+	rerank_enabled, fusion_method, rrf_rank_constant, fts_candidate_limit,
+	vector_candidate_limit,
+	prompt_version, model_profile, embedding_profile,
 	embedding_provider, embedding_model, embedding_dimensions, created_at`
 
 // Create validates the request and inserts one immutable configuration.
@@ -113,6 +115,22 @@ func (s *Store) Get(ctx context.Context, id string) (Config, error) {
 	return cfg, nil
 }
 
+// GetByName resolves one configuration by its unique name, used by retry
+// paths that must reuse an existing immutable identity instead of creating
+// twins.
+func (s *Store) GetByName(ctx context.Context, name string) (Config, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+configColumns+` FROM rag_configs WHERE name = $1`, strings.TrimSpace(name))
+	cfg, err := scanConfig(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Config{}, ErrNotFound
+		}
+		return Config{}, fmt.Errorf("get rag config by name: %w", err)
+	}
+	return cfg, nil
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -121,11 +139,25 @@ func scanConfig(row scanner) (Config, error) {
 	var cfg Config
 	if err := row.Scan(
 		&cfg.ID, &cfg.Name, &cfg.ChunkSize, &cfg.ChunkOverlap, &cfg.RetrievalMode,
-		&cfg.TopK, &cfg.RerankEnabled, &cfg.PromptVersion, &cfg.ModelProfile,
+		&cfg.TopK, &cfg.RerankEnabled, &cfg.FusionMethod, &cfg.RRFConstant,
+		&cfg.FTSCandidateLimit, &cfg.VectorCandidateLimit,
+		&cfg.PromptVersion, &cfg.ModelProfile,
 		&cfg.EmbeddingProfile, &cfg.EmbeddingProvider, &cfg.EmbeddingModel,
 		&cfg.EmbeddingDimensions, &cfg.CreatedAt,
 	); err != nil {
 		return Config{}, err
+	}
+	if cfg.FusionMethod == "" {
+		cfg.FusionMethod = FusionMethodRRF
+	}
+	if cfg.RRFConstant == 0 {
+		cfg.RRFConstant = DefaultRRFConstant
+	}
+	if cfg.FTSCandidateLimit == 0 {
+		cfg.FTSCandidateLimit = DefaultCandidateLimit
+	}
+	if cfg.VectorCandidateLimit == 0 {
+		cfg.VectorCandidateLimit = DefaultCandidateLimit
 	}
 	cfg.UnavailableCapabilities = unavailableCapabilitiesFor(cfg.RetrievalMode, cfg.RerankEnabled)
 	return cfg, nil

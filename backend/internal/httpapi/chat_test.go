@@ -34,7 +34,7 @@ type httpChatRetriever struct {
 	err      *rag.Error
 }
 
-func (f httpChatRetriever) Retrieve(context.Context, ragconfig.Config, []float32) ([]rag.Evidence, int64, *rag.Error) {
+func (f httpChatRetriever) Retrieve(context.Context, ragconfig.Config, string, []float32) ([]rag.Evidence, int64, *rag.Error) {
 	if f.err != nil {
 		return nil, 1, f.err
 	}
@@ -95,7 +95,7 @@ func makeHTTPChatPipeline(generator providers.Generator, retriever EvidenceSourc
 // Alias keeps the helper signature explicit without exposing a test-only
 // implementation from the rag package.
 type EvidenceSourceForHTTP interface {
-	Retrieve(context.Context, ragconfig.Config, []float32) ([]rag.Evidence, int64, *rag.Error)
+	Retrieve(context.Context, ragconfig.Config, string, []float32) ([]rag.Evidence, int64, *rag.Error)
 }
 
 func httpEvidence() []rag.Evidence {
@@ -113,7 +113,7 @@ func TestChatHTTPHappyPathShape(t *testing.T) {
 	}}, httpChatRetriever{evidence: httpEvidence()}, traces)
 	handler := NewFullAPI(testLogger(), &fakeStore{get: func(context.Context, string) (ragconfig.Config, error) {
 		return sampleConfig(), nil
-	}}, DocumentOptions{}, pipeline, httpTraceReads{})
+	}}, DocumentOptions{}, pipeline, httpTraceReads{}, EvalOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{"question":"How does approval work?","config_id":"`+sampleConfig().ID+`"}`))
 	rec := httptest.NewRecorder()
@@ -140,7 +140,7 @@ func TestChatHTTPInvalidBodyAndValidation(t *testing.T) {
 	pipeline := makeHTTPChatPipeline(httpChatGenerator{}, httpChatRetriever{evidence: httpEvidence()}, &httpChatTraces{})
 	handler := NewFullAPI(testLogger(), &fakeStore{get: func(context.Context, string) (ragconfig.Config, error) {
 		return sampleConfig(), nil
-	}}, DocumentOptions{}, pipeline, httpTraceReads{})
+	}}, DocumentOptions{}, pipeline, httpTraceReads{}, EvalOptions{})
 
 	cases := []struct {
 		name string
@@ -211,7 +211,7 @@ func TestChatHTTPClassifiedFailuresCarryTraceID(t *testing.T) {
 			pipeline := makeHTTPChatPipeline(tc.generator, tc.retriever, traces)
 			handler := NewFullAPI(testLogger(), &fakeStore{get: func(context.Context, string) (ragconfig.Config, error) {
 				return sampleConfig(), nil
-			}}, DocumentOptions{}, pipeline, httpTraceReads{})
+			}}, DocumentOptions{}, pipeline, httpTraceReads{}, EvalOptions{})
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{"question":"q","config_id":"`+sampleConfig().ID+`"}`))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -240,7 +240,7 @@ func TestChatHTTPTracePersistenceFailureReturns500(t *testing.T) {
 	}}, httpChatRetriever{evidence: httpEvidence()}, traces)
 	handler := NewFullAPI(testLogger(), &fakeStore{get: func(context.Context, string) (ragconfig.Config, error) {
 		return sampleConfig(), nil
-	}}, DocumentOptions{}, pipeline, httpTraceReads{})
+	}}, DocumentOptions{}, pipeline, httpTraceReads{}, EvalOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{"question":"q","config_id":"`+sampleConfig().ID+`"}`))
 	rec := httptest.NewRecorder()
@@ -269,7 +269,7 @@ func TestTraceReadRoutes(t *testing.T) {
 	pipeline := makeHTTPChatPipeline(httpChatGenerator{}, httpChatRetriever{}, &httpChatTraces{})
 	handler := NewFullAPI(testLogger(), &fakeStore{get: func(context.Context, string) (ragconfig.Config, error) {
 		return sampleConfig(), nil
-	}}, DocumentOptions{}, pipeline, reads)
+	}}, DocumentOptions{}, pipeline, reads, EvalOptions{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/traces?limit=1", nil)
 	rec := httptest.NewRecorder()

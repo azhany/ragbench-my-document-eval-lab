@@ -1,0 +1,19 @@
+RM-02 Data Sharing Policy (Internal, fictional demonstration corpus)
+====================================================================
+
+1. Scope. This policy governs sharing of non-personal operational data
+between departments of the demonstration agency.
+
+2. Data sharing agreement. Every cross-department share requires a signed
+data sharing agreement naming the dataset owner, permitted purposes, and a
+review date no later than 24 months after signature.
+
+3. Personal data. Any dataset containing personal data must first pass an
+anonymisation review; de-identified logs retain latencies and totals but drop
+identifiers, free-text remarks, and device fingerprints.
+
+4. Retention. Shared extracts expire 90 days after the review date unless the
+agreement is renewed. Expired extracts are deleted and the deletion recorded
+in the register.
+
+5. Reporting. The register of active agreements is reviewed quarterly.
