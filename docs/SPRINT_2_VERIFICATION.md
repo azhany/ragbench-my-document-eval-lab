@@ -50,12 +50,17 @@ the documented policy. These are synthetic verification inputs, not user data.
   HTTP 401 (2026-09-15). Correct the credentials privately and recreate Airflow
   before rerunning `sh scripts/smoke-documents.sh`. No real embedding success
   is claimed. The configured embedding-specific key takes precedence.
-- **Browser verification:** the computer-use inventory returned no browsers;
-  the in-app browser was unavailable too. UI behavior is component-tested and
-  the bundle builds, but no browser walkthrough is claimed. Run the Library
-  walkthrough in `docs/TEST_PLAN.md` with a connected browser to close RB-08.
-- **Historical trace rendering:** RB-11 does not exist yet. Database evidence
-  retention is tested now; trace-page rendering must be checked when it lands.
+- **Browser verification:** the original computer-use inventory returned no
+  browsers, but the Playwright/Chromium harness became available on
+  2026-09-16. Its read-only live walkthrough passed 16/16 checks, including
+  Library processed/failed states, errors/chunk counts, revision history and
+  RB-12-style retained trace evidence. Browser upload and
+  browser-triggered reprocess/delete remain mutation-specific follow-up checks;
+  the underlying lifecycle is covered by the recorded HTTP/Airflow smoke.
+- **Historical trace rendering:** RB-11 is now present and the Playwright
+  walkthrough opened retained trace evidence successfully. Database retention
+  and trace rendering are both covered; the remaining RB-08 follow-up is only
+  browser-triggered mutation coverage.
 
 These limitations carry forward explicitly; no test double is presented as a
 real-provider or browser success.
@@ -86,8 +91,9 @@ authenticate tiny synthetic embedding requests and printed HTTP status only.
   assert active revision switching and two retained ready revisions, then queue
   another revision for deletion during processing. These new success assertions
   remain unexecuted because the initial embedding request failed authentication.
-- Rechecked browser availability: no browser surfaces were connected. Browser
-  acceptance and RB-11 historical trace rendering remain open.
+- Rechecked browser availability through the Playwright harness: the live
+  read-only walkthrough passed 16/16 checks. Mutation-specific browser actions
+  remain a follow-up; RB-11 historical trace rendering is now exercised.
 
 New retained runtime evidence:
 
@@ -99,8 +105,8 @@ New retained runtime evidence:
 | PDF | `e047b38f-f80d-4bbd-8fe3-60aa00906a03` |
 | Corrupt PDF | `dca2bf23-47ca-42f2-ac63-c5f3296fa5c9` |
 
-RB-07 and RB-08 are not marked fully accepted: authentication and browser
-access still block their remaining end-to-end checks.
+RB-07 is fully accepted. RB-08's browser-environment blocker is cleared;
+authentication is no longer a blocker for the recorded provider lifecycle.
 
 ## Provider compatibility reverification — 2026-09-16
 
@@ -109,6 +115,6 @@ credentials. Native Hugging Face embedding support, a 384d pgvector migration,
 and OpenAI-compatible generation routing were added and verified. The full
 real Hugging Face TXT/DOCX/PDF lifecycle and successful replacement passed;
 SQL confirmed eight 384d ready vectors and eight FTS rows. RB-07 is now fully
-verified. RB-08 retains only browser/trace-history walkthrough gates because
-computer-use inventory still exposes no browser. Full evidence is in
+verified. RB-08's browser-environment blocker is cleared; only
+mutation-specific browser actions remain a follow-up. Full evidence is in
 [PROVIDER_COMPATIBILITY_VERIFICATION.md](PROVIDER_COMPATIBILITY_VERIFICATION.md).

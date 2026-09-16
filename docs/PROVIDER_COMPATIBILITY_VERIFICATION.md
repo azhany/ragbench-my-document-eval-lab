@@ -111,8 +111,8 @@ which explains the prior OpenAI HTTP 401 result.
 ## Criteria status
 
 - RB-07: all acceptance criteria and verification checks pass.
-- RB-08: provider-backed lifecycle passes; the authorized browser companion
-  inspected historical trace/config/evidence and visible provider failures.
+- RB-08: provider-backed lifecycle and the Playwright Library/history checks
+  pass; browser-triggered mutation coverage remains a follow-up.
 - RB-09: all acceptance criteria and verification checks pass.
 - RB-10: OpenAI-compatible contract, live synthetic generation, and a grounded
   answer/citations trace pass; the current HF account is now blocked by HTTP
@@ -154,3 +154,24 @@ Chromium (Playwright, Chrome Headless Shell 151) drove the live frontend at
 - Out-of-library question showed the distinct insufficient-evidence state.
 
 This closes all remaining RB-12 acceptance criteria and verification checks.
+
+## RB-08, RB-20 and RB-22 Playwright re-verification (2026-09-16)
+
+The same live Playwright/Chromium harness was then used for a non-mutating
+walkthrough of the current persisted data. All 16 checks passed:
+
+- RB-08 Library loaded processed and failed documents with chunk counts and
+  actual errors; revision history and RB-12-style retained trace evidence
+  opened successfully.
+- RB-20 Experiments loaded the persisted failed matrix, showed no undefined
+  combination labels, and the renderer fix is covered by a frontend test that
+  exercises persisted run/config/index/policy identities, config differences,
+  separate quality/efficiency groups, and no-single-winner messaging.
+- RB-22 Monitor accepted the local IANA timezone, displayed filters and
+  failure links, opened trace detail, and Overview values matched the metrics
+  API.
+
+This clears the browser-environment blocker for RB-08. The walkthrough did not
+upload or reprocess new provider-backed documents, advance an experiment, or
+create a new evaluation pair; those mutation/provider gates remain explicitly
+open in RB-20 and RB-24.

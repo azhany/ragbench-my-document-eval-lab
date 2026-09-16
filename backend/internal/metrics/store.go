@@ -341,9 +341,11 @@ func (s *Store) failures(ctx context.Context, f Filter, out *Summary) error {
 		        'trace' resource_type, COALESCE(t.error_message,'') message, t.created_at happened_at
 		 FROM rag_traces t WHERE NOT t.success`+queryFilter+`
 		 UNION ALL
-		 SELECT 'ingestion', j.error_code, j.document_id::text, j.document_id::text,
-		        'document', COALESCE(j.error_message,''), COALESCE(j.finished_at,j.updated_at)
-		 FROM ingestion_jobs j WHERE j.state IN ('failed','dispatch_failed')
+			 SELECT 'ingestion', j.error_code, ir.document_id::text, ir.document_id::text,
+			        'document', COALESCE(j.error_message,''), COALESCE(j.finished_at,j.updated_at)
+			 FROM ingestion_jobs j
+			 JOIN index_revisions ir ON ir.id = j.index_revision_id
+			 WHERE j.state IN ('failed','dispatch_failed')
 		 UNION ALL
 		 SELECT 'evaluation', COALESCE(er.query_error_code,'evaluator_failed'), er.run_id::text,
 		        er.run_id::text, 'eval_run', COALESCE(er.query_error_message,er.evaluator_error,''), er.created_at

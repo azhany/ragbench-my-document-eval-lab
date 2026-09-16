@@ -40,6 +40,11 @@ const compareError = ref(null)
 const canCreate = computed(() => baseConfigID.value && datasetID.value && experimentName.value.trim())
 const runsOfExperiment = ref([])
 
+const candidateEntry = computed(() =>
+  runsOfExperiment.value.find((run) => run.id === candidateRunID.value) ?? null)
+const baselineEntry = computed(() =>
+  runsOfExperiment.value.find((run) => run.id === baselineRunID.value) ?? null)
+
 function csvList(value) {
   return String(value).split(',').map((s) => s.trim()).filter(Boolean).map(
     (s) => (/^\d+$/.test(s) ? Number(s) : s))
@@ -123,9 +128,21 @@ async function open(id) {
   compareError.value = null
   try {
     detail.value = await api.get(`/api/v1/experiments/${id}`)
-    runsOfExperiment.value = detail.value.combinations
-      .filter((c) => c.eval_run_id)
-      .map((c) => ({ combination: c.Index, id: c.eval_run_id, status: c.eval_run_status }))
+    const linked = detail.value.combinations.filter((c) => c.eval_run_id)
+    runsOfExperiment.value = await Promise.all(linked.map(async (c) => {
+      // The experiment detail contains the immutable config/run links, while
+      // the run detail contains the pinned corpus and evaluator policy. Load
+      // both so the comparison view can show identities instead of only IDs.
+      const run = await api.get(`/api/v1/eval-runs/${c.eval_run_id}`).catch(() => null)
+      return {
+        combination: c.combination_index,
+        id: c.eval_run_id,
+        status: c.eval_run_status || run?.status || 'unknown',
+        configID: c.rag_config_id || run?.rag_config_id || '',
+        config: configs.value.find((config) => config.id === (c.rag_config_id || run?.rag_config_id)) ?? null,
+        run,
+      }
+    }))
     if (!candidateRunID.value && runsOfExperiment.value.length) {
       candidateRunID.value = runsOfExperiment.value[0].id
       if (runsOfExperiment.value.length > 1) baselineRunID.value = runsOfExperiment.value[1].id
@@ -158,6 +175,10 @@ async function advance() {
 async function compareNow() {
   compareError.value = null
   compare.value = null
+  if (!candidateEntry.value || !baselineEntry.value) {
+    compareError.value = { message: 'Select both a candidate and a baseline run before comparing.' }
+    return
+  }
   compareBusy.value = true
   try {
     const query = `?policy=${encodeURIComponent(comparePolicy.value)}`
@@ -170,21 +191,67 @@ async function compareNow() {
   }
 }
 
-const diffRows = computed(() => {
-  const candidate = configs.value.find((c) => c.id === baseConfigID.value)
-  const rows = []
-  if (!candidate) return rows
-  const labels = {
-    chunk_size: 'Chunk size', chunk_overlap: 'Chunk overlap', top_k: 'Top-k',
-    retrieval_mode: 'Retrieval mode', prompt_version: 'Prompt version',
-    model_profile: 'Model profile', rerank_enabled: 'Rerank',
-    reranker_profile: 'Reranker profile', rerank_candidate_limit: 'Rerank candidates',
+const configDiffFields = {
+  chunk_size: 'Chunk size',
+  chunk_overlap: 'Chunk overlap',
+  top_k: 'Top-k',
+  retrieval_mode: 'Retrieval mode',
+  prompt_version: 'Prompt version',
+  model_profile: 'Model profile',
+  embedding_profile: 'Embedding profile',
+  rerank_enabled: 'Rerank',
+  reranker_profile: 'Reranker profile',
+  rerank_candidate_limit: 'Rerank candidates',
+}
+
+function configValue(entry, field) {
+  const value = entry?.config?.[field]
+  return value == null ? 'Unavailable' : value
+}
+
+const diffRows = computed(() => Object.entries(configDiffFields).map(([field, label]) => ({
+  field,
+  label,
+  baseline: configValue(baselineEntry.value, field),
+  candidate: configValue(candidateEntry.value, field),
+})))
+
+function revisionIdentity(entry) {
+  const revisions = entry?.run?.corpus_revisions
+  if (!Array.isArray(revisions) || !revisions.length) return 'No compatible ready revision was pinned'
+  return revisions.map((revision) =>
+    `${revision.revision_id} · ${revision.filename || revision.document_id}`).join('; ')
+}
+
+function policyIdentity(entry) {
+  const policy = entry?.run?.evaluator_policy
+  if (!policy || typeof policy !== 'object') return 'Unavailable'
+  return `${policy.policy_version || 'policy unavailable'} · ${policy.rubric_version || 'rubric unavailable'} · scoring K ${policy.scoring_k ?? 'unavailable'}`
+}
+
+function identityFor(entry) {
+  return {
+    run: entry?.id || 'Unavailable',
+    dataset: entry?.run
+      ? `${entry.run.dataset_id} · v${entry.run.dataset_version}`
+      : 'Unavailable',
+    config: entry?.configID || entry?.run?.rag_config_id || 'Unavailable',
+    configName: entry?.config?.name || 'Unavailable',
+    index: revisionIdentity(entry),
+    policy: policyIdentity(entry),
   }
-  for (const [field, label] of Object.entries(labels)) {
-    rows.push({ field, label, baseline: candidate[field] })
-  }
-  return rows
-})
+}
+
+const comparisonIdentities = computed(() => [
+  { label: 'Baseline', entry: baselineEntry.value, identity: identityFor(baselineEntry.value) },
+  { label: 'Candidate', entry: candidateEntry.value, identity: identityFor(candidateEntry.value) },
+].filter((item) => item.entry))
+
+const qualityMetrics = new Set(['recall_k', 'mrr', 'ndcg_k'])
+function rulesFor(group) {
+  return (compare.value?.verdict?.rules ?? []).filter((rule) =>
+    group === 'quality' ? qualityMetrics.has(rule.metric) : !qualityMetrics.has(rule.metric))
+}
 
 function stateFor(c) {
   if (c.index_error || c.eval_run_error) return 'failed'
@@ -357,27 +424,73 @@ onMounted(() => load({ initial: true }))
             compatible: {{ compare.verdict?.comparable }} <span
               v-if="compare.verdict?.reasons?.length">({{ compare.verdict.reasons.join('; ') }})</span>
           </p>
-          <dl data-test="config-diff">
-            <template v-for="row in diffRows" :key="row.field">
-              <dt>{{ row.label }}</dt>
-              <dd>{{ row.baseline }}</dd>
-            </template>
-          </dl>
-          <table data-test="metric-deltas">
-            <thead><tr><th>Metric</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Direction</th><th>Threshold</th><th>Verdict</th><th>Reason</th></tr></thead>
+          <p class="muted">Quality and efficiency are reported separately; no single overall winner is inferred.</p>
+
+          <section class="comparison-identities" data-test="comparison-identities">
+            <h4>Persisted comparison identities</h4>
+            <div class="identity-grid">
+              <article v-for="item in comparisonIdentities" :key="item.label" class="identity-card">
+                <h5>{{ item.label }}</h5>
+                <dl>
+                  <dt>Run</dt><dd><code>{{ item.identity.run }}</code></dd>
+                  <dt>Dataset/version</dt><dd><code>{{ item.identity.dataset }}</code></dd>
+                  <dt>Configuration</dt><dd>{{ item.identity.configName }} · <code>{{ item.identity.config }}</code></dd>
+                  <dt>Index revisions</dt><dd><code>{{ item.identity.index }}</code></dd>
+                  <dt>Evaluator policy</dt><dd>{{ item.identity.policy }}</dd>
+                </dl>
+              </article>
+            </div>
+          </section>
+
+          <table class="config-diff" data-test="config-diff">
+            <caption>Configuration differences</caption>
+            <thead><tr><th>Setting</th><th>Baseline</th><th>Candidate</th></tr></thead>
             <tbody>
-              <tr v-for="rule in compare.verdict?.rules ?? []" :key="rule.metric" :data-state="rule.state">
-                <td><code>{{ rule.metric }}</code></td>
-                <td>{{ rule.baseline ?? 'missing' }}</td>
-                <td>{{ rule.candidate ?? 'missing' }}</td>
-                <td>{{ rule.delta ?? 'undefined' }}</td>
-                <td>{{ rule.direction }}</td>
-                <td>{{ rule.threshold }}</td>
-                <td>{{ rule.state }}</td>
-                <td>{{ rule.reason }}</td>
+              <tr v-for="row in diffRows" :key="row.field">
+                <th scope="row">{{ row.label }}</th>
+                <td>{{ row.baseline }}</td>
+                <td>{{ row.candidate }}</td>
               </tr>
             </tbody>
           </table>
+
+          <section class="metric-group" data-test="quality-metrics">
+            <h4>Quality metrics</h4>
+            <table data-test="metric-deltas">
+              <thead><tr><th>Metric</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Direction</th><th>Threshold</th><th>Verdict</th><th>Reason</th></tr></thead>
+              <tbody>
+                <tr v-for="rule in rulesFor('quality')" :key="rule.metric" :data-state="rule.state">
+                  <td><code>{{ rule.metric }}</code></td>
+                  <td>{{ rule.baseline ?? 'missing' }}</td>
+                  <td>{{ rule.candidate ?? 'missing' }}</td>
+                  <td>{{ rule.delta ?? 'undefined' }}</td>
+                  <td>{{ rule.direction }}</td>
+                  <td>{{ rule.threshold }}</td>
+                  <td>{{ rule.state }}</td>
+                  <td>{{ rule.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="metric-group" data-test="efficiency-metrics">
+            <h4>Efficiency metrics</h4>
+            <table>
+              <thead><tr><th>Metric</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Direction</th><th>Threshold</th><th>Verdict</th><th>Reason</th></tr></thead>
+              <tbody>
+                <tr v-for="rule in rulesFor('efficiency')" :key="rule.metric" :data-state="rule.state">
+                  <td><code>{{ rule.metric }}</code></td>
+                  <td>{{ rule.baseline ?? 'missing' }}</td>
+                  <td>{{ rule.candidate ?? 'missing' }}</td>
+                  <td>{{ rule.delta ?? 'undefined' }}</td>
+                  <td>{{ rule.direction }}</td>
+                  <td>{{ rule.threshold }}</td>
+                  <td>{{ rule.state }}</td>
+                  <td>{{ rule.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
           <p class="note" data-test="delta-units">
             Delta units are stored with each metric (proportions for relative
             deltas, ms for latency, native currency for cost); direction comes
@@ -392,3 +505,16 @@ onMounted(() => load({ initial: true }))
     </template>
   </section>
 </template>
+
+<style scoped>
+.comparison-identities { margin: 1rem 0; }
+.identity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+.identity-card { border: 1px solid var(--border); border-radius: .5rem; padding: 1rem; background: var(--surface); }
+.identity-card h5 { margin: 0 0 .7rem; }
+.identity-card dl { display: grid; grid-template-columns: 8rem 1fr; gap: .45rem .75rem; margin: 0; }
+.identity-card dd { margin: 0; overflow-wrap: anywhere; }
+.config-diff { margin: 1rem 0; }
+.config-diff caption { text-align: left; font-weight: 600; padding: .5rem 0; }
+.metric-group { margin: 1rem 0; overflow-x: auto; }
+.metric-group h4 { margin-bottom: .5rem; }
+</style>
