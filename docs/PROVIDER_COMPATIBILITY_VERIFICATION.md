@@ -90,3 +90,17 @@ which explains the prior OpenAI HTTP 401 result.
 - RB-12: component criteria pass and the live provider 429 blocker is cleared;
   successful browser walkthrough remains open because no browser surface was
   available.
+
+## Grounded chat and lifecycle close-out (2026-09-16)
+
+- Grounded chat against the published database indices returned HTTP 200 with
+  the answer `A reviewer must approve a document before publication [2][4].`
+  and two citations mapped to retrieved chunks (trace
+  `5323b9d0-79cd-4eb8-8a19-612439eb4c95`, latency 2621 ms, 202/24 reported
+  tokens).
+- The trace persisted in PostgreSQL with spans for request, query_embedding,
+  retrieval, prompt_build, llm_generation, and citation_mapping.
+- Reprocessing the cited PDF and tombstone-deleting the cited DOCX left the
+  historical trace fully inspectable via `GET /api/v1/traces/{id}`.
+- This closes the outstanding verification for RB-10 and RB-11 (RB-12's
+  browser walkthrough remains open, no browser surface available).
