@@ -112,6 +112,11 @@ Reuse the existing text-bearing PDF extraction path where practical so assessmen
 
 JPG/PNG inputs require a bounded OCR or vision-language extraction path. The workflow records which extraction method/profile produced the evidence.
 
+The Airflow coordinator derives the persisted method/profile from the MIME type
+(`pdf_text`, `image_ocr`, or `document_text`) rather than treating every
+non-PDF as an image. The parser and coordinator therefore agree on the
+evidence contract for TXT/DOCX, PDF, and image inputs.
+
 ### Extraction evidence
 
 Structured extraction remains traceable to raw extracted text or a durable evidence reference. A reviewer should be able to distinguish:
@@ -165,6 +170,13 @@ The pipeline distinguishes at least:
 
 Retries are bounded and based on failure class. Deterministic validation failures are not “fixed” by repeatedly asking the model until the numbers happen to agree.
 
+The Go runner owns one bounded retry for transient structured/summary provider
+failures and malformed structured output. The Airflow DAG permits one
+orchestration retry only for extraction; schema and financial validation tasks
+have zero Airflow retries. A late task-failure callback is advisory and fenced
+by the persisted stage status so it cannot replace a specific provider/parser
+failure with `task_failed`.
+
 ---
 
 ## 7. Deterministic financial validation
@@ -197,8 +209,9 @@ The tool contract is intentionally small:
 
 1. `extract_text(document)`
 2. `extract_financial_data(evidence, schema_version, prompt_version)`
-3. `validate_financial_data(structured_data, policy_version)`
-4. `generate_summary(structured_data, validation_findings)`
+3. `schema_validate(structured_data, schema_version)`
+4. `validate_financial_data(structured_data, policy_version)`
+5. `generate_summary(structured_data, validation_findings)`
 
 The orchestrator records stage state and correlation metadata. If a required stage fails, later stages cannot silently produce a fully successful final result.
 
@@ -280,6 +293,12 @@ Use a small labeled financial-document set covering multiple layouts and failure
 
 RAG metrics remain separate from extraction metrics when the optional historical-comparison feature is exercised.
 
+The checked-in Sprint 7 set is `db/fixtures/financial/financial_dataset_v1.json`
+with its contract and scoring semantics documented in
+`docs/DOCUMENT_INTELLIGENCE_EVALUATION.md`. `ScorePersistedAnalysis` scores a
+real analysis snapshot; `AggregateFinancialEvaluation` keeps schema/field
+quality, validation detection, latency, usage, and cost as separate outputs.
+
 ---
 
 ## 12. Testing strategy
@@ -350,12 +369,14 @@ Use this table for future implementation discoveries. Keep concise; link to the 
 
 | Date | Story | Decision / observation | Why | Evidence / follow-up |
 |---|---|---|---|---|
-| `<date>` | RB-27 | `<decision>` | `<reason>` | `<link/path>` |
-| `<date>` | RB-28 | `<decision>` | `<reason>` | `<link/path>` |
-| `<date>` | RB-29 | `<decision>` | `<reason>` | `<link/path>` |
-| `<date>` | RB-30 | `<decision>` | `<reason>` | `<link/path>` |
-| `<date>` | RB-31 | `<decision>` | `<reason>` | `<link/path>` |
-| `<date>` | RB-32 | `<decision>` | `<reason>` | `<link/path>` |
+| 2026-09-16 | RB-27 | JPG/PNG use bounded Tesseract OCR; analyses reference the existing document/latest immutable revision | Source storage and identity stay shared with RAG while image failures remain classified | `airflow/dags/ragbench/content.py`, `0020_document_intelligence.sql`, `docs/API.md` |
+| 2026-09-16 | RB-28 | `financial-v1` uses nullable decimal strings, strict JSON parsing, and versioned evidence-only prompts | Decimal strings preserve financial precision and nulls prevent forced guessing; provider output remains untrusted | `backend/internal/documentintelligence/schema.go`, `prompt.go`, `providers/openai.go` |
+| 2026-09-16 | RB-29 | `financial-validation-v1` uses exact `math/big.Rat` arithmetic and persisted `0.01` tolerance | Business arithmetic is deterministic and independently inspectable rather than model-certified | `backend/internal/documentintelligence/validation.go`, `validation_test.go` |
+| 2026-09-16 | RB-30 | The agent is a fixed five-stage tool workflow with one bounded transient/model correction budget | Explicit ordering guarantees validation precedes summary and avoids a general agent framework | `backend/internal/documentintelligence/workflow.go`, `runner.go`, `airflow/dags/document_intelligence.py` |
+| 2026-09-16 | RB-31 | Analysis spans/events and usage/cost state are persisted beside the result; optional RAG comparison is not coupled | Reviewers can attribute failures and latency without treating missing provider usage as zero | `document_analysis_spans`, `store.go`, `runner.go`, `docs/API.md` |
+| 2026-09-16 | RB-32 | README/API/mapping/verification are the reviewer entry points; runtime claims remain marked pending until exercised | Reproducibility requires evidence, not documentation-only completion | `README.md`, `docs/ASSESSMENT_MAPPING.md`, `docs/SPRINT_7_VERIFICATION.md` |
+| 2026-09-17 | RB-27/RB-30 | Live smoke exposed and fixed MIME descriptor drift and a late Airflow callback that could overwrite classified failures | Runtime evidence should exercise failure transitions, not only happy-path code; terminal provider/parser codes must remain inspectable | `airflow/dags/ragbench/intelligence.py`, `airflow/dags/document_intelligence.py`, `test_intelligence.py`, `docs/SPRINT_7_VERIFICATION.md` |
+| 2026-09-17 | RB-31 | Provider usage and cost are accumulated across structured and summary attempts when reported; missing usage remains unavailable | Partial failures should not lose already reported operational data or fabricate a zero | `backend/internal/documentintelligence/runner.go`, `runner_test.go` |
 
 ---
 

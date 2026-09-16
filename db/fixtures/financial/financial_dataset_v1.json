@@ -1,0 +1,76 @@
+{
+  "version": "financial-eval-v1",
+  "schema_version": "financial-v1",
+  "validation_policy_version": "financial-validation-v1",
+  "cases": [
+    {
+      "case_id": "valid-invoice",
+      "fixture": "invoice_valid.txt",
+      "description": "Clean invoice with one line item and reconciled totals.",
+      "expected_validation_status": "pass",
+      "expected_validation_rules": [],
+      "expected": {
+        "schema_version": "financial-v1",
+        "document_type": "invoice",
+        "vendor": "ACME SDN BHD",
+        "invoice_number": "INV-2026-001",
+        "invoice_date": "2026-01-15",
+        "due_date": "2026-02-14",
+        "currency": "MYR",
+        "subtotal": "100.00",
+        "tax": "6.00",
+        "discount": null,
+        "total": "106.00",
+        "line_items": [
+          {"description": "Widget A", "quantity": "2", "unit_price": "50.00", "amount": "100.00"}
+        ]
+      }
+    },
+    {
+      "case_id": "receipt-missing-total",
+      "fixture": "receipt_missing_total.txt",
+      "description": "Receipt whose total is not evidenced, while the subtotal is available.",
+      "expected_validation_status": "failure",
+      "expected_validation_rules": ["required.total"],
+      "expected": {
+        "schema_version": "financial-v1",
+        "document_type": "receipt",
+        "vendor": "HARBOUR MARKET",
+        "invoice_number": "R-8842",
+        "invoice_date": "2026-02-03",
+        "due_date": null,
+        "currency": "MYR",
+        "subtotal": "12.50",
+        "tax": "0.00",
+        "discount": null,
+        "total": null,
+        "line_items": [
+          {"description": "Coffee beans", "quantity": "1", "unit_price": "12.50", "amount": "12.50"}
+        ]
+      }
+    },
+    {
+      "case_id": "inconsistent-invoice",
+      "fixture": "invoice_inconsistent.txt",
+      "description": "Invoice with an incorrect line extension, subtotal, and total.",
+      "expected_validation_status": "failure",
+      "expected_validation_rules": ["line_item.extension", "subtotal.line_items", "total.reconciliation"],
+      "expected": {
+        "schema_version": "financial-v1",
+        "document_type": "invoice",
+        "vendor": "NORTHSTAR OFFICE SUPPLIES",
+        "invoice_number": "NS-77",
+        "invoice_date": "2026-03-01",
+        "due_date": "2026-03-31",
+        "currency": "MYR",
+        "subtotal": "100.00",
+        "tax": "6.00",
+        "discount": null,
+        "total": "110.00",
+        "line_items": [
+          {"description": "Archive boxes", "quantity": "2", "unit_price": "50.00", "amount": "99.00"}
+        ]
+      }
+    }
+  ]
+}

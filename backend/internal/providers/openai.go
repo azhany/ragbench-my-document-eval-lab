@@ -71,6 +71,14 @@ type Generator interface {
 	Generate(ctx context.Context, profile GenerationProfile, prompt string) (GenerationResult, error)
 }
 
+// StructuredGenerator is an optional extension to Generator. Providers that
+// support the OpenAI JSON response mode can use it; callers still validate the
+// returned bytes locally because response-format enforcement is not a schema
+// validator and compatible providers may ignore the hint.
+type StructuredGenerator interface {
+	GenerateStructured(ctx context.Context, profile GenerationProfile, prompt string, schema json.RawMessage) (GenerationResult, error)
+}
+
 // OpenAI is an OpenAI Chat Completions/Embeddings protocol client. The
 // provider identity and base URL are explicit so the same wire contract can
 // be used with OpenAI-compatible services without mislabelling their traces.
@@ -203,6 +211,16 @@ func (o *OpenAI) Embed(ctx context.Context, profile EmbeddingProfile, texts []st
 // failure taxonomy distinguishes timeout, rate limiting, malformed responses
 // and other provider failures so traces can classify them.
 func (o *OpenAI) Generate(ctx context.Context, profile GenerationProfile, prompt string) (GenerationResult, error) {
+	return o.generate(ctx, profile, prompt, false)
+}
+
+// GenerateStructured requests the provider's JSON object response mode. The
+// caller remains responsible for strict financial-v1 schema validation.
+func (o *OpenAI) GenerateStructured(ctx context.Context, profile GenerationProfile, prompt string, _ json.RawMessage) (GenerationResult, error) {
+	return o.generate(ctx, profile, prompt, true)
+}
+
+func (o *OpenAI) generate(ctx context.Context, profile GenerationProfile, prompt string, structured bool) (GenerationResult, error) {
 	if profile.Provider != o.provider() {
 		return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
 			Message: fmt.Sprintf("generation provider %q is not configured", profile.Provider)}
@@ -211,12 +229,18 @@ func (o *OpenAI) Generate(ctx context.Context, profile GenerationProfile, prompt
 		return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
 			Message: "generation API key is not configured in the API service"}
 	}
-	body, err := json.Marshal(map[string]any{
+	requestBody := map[string]any{
 		"model": profile.Model,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
-	})
+	}
+	if structured {
+		// json_object is the broadly supported OpenAI-compatible contract. The
+		// financial schema is enforced again after the response is received.
+		requestBody["response_format"] = map[string]string{"type": "json_object"}
+	}
+	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return GenerationResult{}, &ProviderError{Code: ErrCodeMalformedResponse,
 			Message: "encode generation request"}

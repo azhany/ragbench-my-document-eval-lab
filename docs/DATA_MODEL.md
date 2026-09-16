@@ -121,6 +121,36 @@ creates a new configuration identity under a new name (migration
   changes; must stay compatible with `index_revisions`
 - created_at
 
+### document_analyses / document_analysis_spans (`0020`, RB-27–RB-31)
+
+`document_analyses` is the durable identity for one financial-document run.
+It references both `documents.id` and the immutable `(source_revision_id,
+document_id)` pair, plus the saved configuration identity and a separate
+analysis `trace_id`. Airflow run/job identity, stage state, extraction method,
+schema/prompt/model/validation-policy versions, bounded extraction evidence,
+normalized structured data, schema errors, validation findings, summary,
+stage metrics, tool events, usage, cost, retry count, and classified failure
+are persisted in this row. Raw model output is retained for server-side
+diagnosis but is not returned by the public result API.
+
+The state machine is `dispatch` → `extract_text` → `structured_extract` →
+`schema_validate` → `financial_validate` → `summarize`. A completed row can
+only be published after a summary exists; a summary-provider failure remains
+`partial` with earlier structured/validation evidence intact. Deleting a
+document tombstones the source and cancels unfinished analyses.
+
+`document_analysis_spans` stores the request and named tool stages with
+duration, status, safe metadata, and the analysis trace identity. The
+`tool_events` JSONB snapshot keeps retry attempts visible alongside the
+queryable spans.
+
+The labeled assessment set is deliberately file-backed rather than another
+application table for this bounded PoC: see
+[`DOCUMENT_INTELLIGENCE_EVALUATION.md`](DOCUMENT_INTELLIGENCE_EVALUATION.md)
+and `db/fixtures/financial/financial_dataset_v1.json`. It scores persisted
+analysis snapshots without making PostgreSQL lose its role as the source of
+truth for workflow results.
+
 ### eval_datasets (implemented, `0009`/`0013`)
 - id UUID PK
 - name UNIQUE (1–200 chars)

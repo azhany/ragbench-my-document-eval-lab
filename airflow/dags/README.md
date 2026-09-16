@@ -4,18 +4,22 @@ Implemented DAGs (Airflow 3.0.6 Task SDK):
 
 - `document_ingestion`
 - `document_reindex`
+- `document_intelligence`
 
-Both use the same five stages: extract → normalize → chunk → embed → publish.
-They are manually dispatched by Go with `conf: {"job_id":"UUID"}` and the
-persisted `rb_<revision UUID>` run ID. There is no scheduled ingestion scan.
+`document_ingestion` and `document_reindex` use the same five stages: extract
+→ normalize → chunk → embed → publish. They are manually dispatched by Go with
+`conf: {"job_id":"UUID"}` and the persisted `rb_<revision UUID>` run ID.
+There is no scheduled ingestion scan.
 The public API and task validate job ownership. PostgreSQL supplies source
 identity and settings; XCom never carries document contents or vectors.
 
-Reusable logic lives in `ragbench/`. Parser dependencies are pinned in
-`airflow/requirements.txt` and installed by `airflow/Dockerfile`. PDF is text
-extraction only (no OCR). DOCX includes body paragraphs, headings and table
-rows in source order; headers/footers/comments and embedded objects are outside
-this PoC. TXT must be UTF-8 (BOM accepted).
+Reusable logic lives in `ragbench/`. Parser/OCR dependencies are pinned in
+`airflow/requirements.txt` and installed by `airflow/Dockerfile`. PDF is parsed
+for text; image-only PDFs remain a visible extraction failure. JPG/PNG use a
+bounded Tesseract OCR path and record `image_ocr`/`tesseract-ocr-v1`. DOCX
+includes body paragraphs, headings and table rows in source order;
+headers/footers/comments and embedded objects are outside this PoC. TXT must
+be UTF-8 (BOM accepted).
 
 Chunk units are Unicode characters after NFC normalization, control removal,
 whitespace collapse and a newline between source blocks. Fixed-size windows
@@ -30,11 +34,26 @@ explicit dimensions and float encoding, checks response model/order/count/
 dimensions/finiteness/nonzero vectors, then writes a complete batch of vectors
 transactionally. Provider failure never publishes an incomplete revision.
 
-Stages retry twice, ten seconds apart, with a ten-minute task timeout. To recover
+Ingestion/reindex stages retry twice, ten seconds apart, with a ten-minute task timeout. To recover
 an exhausted failure, use Library Reprocess (new revision). Clearing the same
 task in Airflow is also idempotent while that revision is still latest; a later
 revision or deletion fences off the old task. Parser/chunk changes that alter
 existing chunk evidence fail with `revision_conflict` instead of overwriting it.
+
+`document_intelligence` (RB-27--RB-31) is dispatched by Go with
+`conf: {"analysis_id":"UUID","job_id":"UUID"}` and run ID
+`di_<analysis UUID>`. Its fixed stages are `extract_text` →
+`structured_extract` → `schema_validate` → `financial_validate` → `summarize`.
+The first stage runs the shared parser/OCR runtime and submits bounded evidence
+to Go; all structured extraction, validation, summary generation, state,
+events, and spans remain Go/PostgreSQL-owned. The stage client verifies the
+Airflow/run identity and direct pre-API failures are classified in PostgreSQL.
+`extract_text` has one Airflow retry for transient parser/OCR process failures;
+structured extraction and summary each own one bounded transient/provider retry
+inside Go; schema and financial validation have no Airflow retries. A failed
+stage remains visible with its specific error code.
+The provider-independent labels and quality/validation/operational scoring
+dimensions are documented in `docs/DOCUMENT_INTELLIGENCE_EVALUATION.md`.
 
 Implemented since Sprint 4/5 (orchestration only — evaluation logic lives in
 `ragbench/evaluation.py`, which just calls the Go API; Python never

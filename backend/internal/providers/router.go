@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -36,6 +37,21 @@ func (r *Router) Generate(ctx context.Context, profile GenerationProfile, prompt
 	if generator == nil {
 		return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
 			Message: fmt.Sprintf("generation provider %q is not configured", profile.Provider)}
+	}
+	return generator.Generate(ctx, profile, prompt)
+}
+
+// GenerateStructured uses a provider's optional JSON response mode when it
+// has one, while preserving the ordinary Generator contract for test doubles
+// and compatible endpoints that do not expose that extension.
+func (r *Router) GenerateStructured(ctx context.Context, profile GenerationProfile, prompt string, schema json.RawMessage) (GenerationResult, error) {
+	generator := r.Generators[profile.Provider]
+	if generator == nil {
+		return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
+			Message: fmt.Sprintf("generation provider %q is not configured", profile.Provider)}
+	}
+	if structured, ok := generator.(StructuredGenerator); ok {
+		return structured.GenerateStructured(ctx, profile, prompt, schema)
 	}
 	return generator.Generate(ctx, profile, prompt)
 }

@@ -169,8 +169,9 @@ when the id is unknown or not a UUID; `405` for other methods.
 
 `POST /api/v1/documents` accepts exactly two multipart fields: `file` and
 `config_id` (an existing saved RAG configuration UUID), in either order.
-PDF, DOCX and UTF-8 TXT extensions are accepted case-insensitively; the batch
-extractor validates actual content. Client MIME claims are ignored. Names must
+PDF, DOCX, UTF-8 TXT, JPG/JPEG and PNG extensions are accepted
+case-insensitively; the batch extractor validates actual content. Client MIME
+claims are ignored. Names must
 be plain filenames, ≤255 bytes, without `/`, `\`, `:`, or control characters.
 The default byte limit is 20 MiB (`MAX_UPLOAD_BYTES`); the complete multipart
 request has an additional 64 KiB allowance for headers/fields. Empty files are
@@ -249,7 +250,7 @@ Errors use the shared `{"error":{"code":"...","message":"..."}}` envelope:
 | 400 | `invalid_upload`, `invalid_filename`, `empty_upload` | Correct multipart fields/name/content |
 | 400 | `invalid_config`, `invalid_body` | Use an existing configuration and documented request shape |
 | 413 | `upload_too_large` | Reduce the file or raise the configured bound |
-| 415 | `unsupported_format` | Use PDF/DOCX/TXT |
+| 415 | `unsupported_format` | Use PDF/DOCX/TXT/JPG/JPEG/PNG |
 | 404 | `not_found` | ID malformed, unknown or deleted |
 | 409 | `duplicate_document` | Inspect the existing live document; use reprocess if needed |
 | 409 | `ingestion_active`, `dispatch_not_retryable` | Inspect latest job state before repeating the action |
@@ -267,8 +268,9 @@ unreferenced files and missing sources; it never deletes evidence automatically.
 
 Batch failures are returned in `job.error_code` / `job.error_message`, including
 `storage_failed`, `source_changed`, `corrupt_document`, `encrypted_document`,
-`image_only_or_empty`, `empty_content`, `extraction_limit`, `revision_conflict`,
-`embedding_failed`, `indexing_failed`, and `task_failed`. Embedding errors name
+`image_only_or_empty`, `image_unreadable`, `ocr_unavailable`, `ocr_timeout`,
+`empty_content`, `extraction_limit`, `revision_conflict`, `embedding_failed`,
+`indexing_failed`, and `task_failed`. Embedding errors name
 the batch and starting chunk without exposing provider bodies or credentials.
 Airflow retries a stage twice, ten seconds apart; a failed retry becomes visible
 immediately. Creating a new revision fences off subsequent retries of older jobs.
@@ -287,6 +289,73 @@ counterparts are `rubric-v1-big-pickle`, `rubric-v1-mimo-free`, and
 OpenAI-compatible router at `https://router.huggingface.co/v1` and the
 configured `HF_TOKEN`; its cost remains unavailable unless the router exposes
 an explicit rate for the selected provider/model.
+
+## Document intelligence analyses (RB-27–RB-31)
+
+An analysis reuses an uploaded document and its immutable latest source
+revision. It does not create a second file store. The analysis is dispatched
+asynchronously to the `document_intelligence` Airflow DAG and can be inspected
+through its durable analysis ID and trace ID.
+
+### `POST /api/v1/documents/{id}/analyses`
+
+The request body is optional. The empty object `{}` inherits the model profile
+from the document's saved RAG configuration. A reviewer may select another
+registered model profile explicitly:
+
+```json
+{"model_profile":"opencode-go-glm-5.3-flash"}
+```
+
+The `202 Accepted` response contains the analysis snapshot. Its important
+fields are `id`, `document_id`, `source_revision_id`, `trace_id`, `status`,
+`stage`, `job`, `prompt_version`, `schema_version`, and
+`validation_policy_version`. The initial status is `queued`; Airflow advances
+it through `processing` to `completed`, `partial`, or `failed`.
+
+Example:
+
+```sh
+curl -X POST http://localhost:8080/api/v1/documents/<document-id>/analyses \
+  -H 'Content-Type: application/json' -d '{}'
+curl http://localhost:8080/api/v1/document-analyses/<analysis-id>
+```
+
+### `GET /api/v1/document-analyses/{analysisId}`
+
+Returns the durable result, including bounded `extraction_evidence`,
+schema-valid `structured_data` when available, `schema_errors`,
+`validation_status`, ordered `validation_findings`, `summary`,
+`stage_metrics`, `tool_events`, usage/cost metadata, and `spans`. Raw model
+output is retained for failure diagnosis but is not returned by this API.
+`summary` is only populated after deterministic validation has completed; a
+summary-provider failure is returned as `status: "partial"` with the existing
+structured data and findings intact.
+
+### `GET /api/v1/documents/{id}/analyses`
+
+Returns `{"analyses":[...]}` newest first. `POST
+/api/v1/document-analyses/{analysisId}/retry-dispatch` retries only a persisted
+`dispatch_pending` or `dispatch_failed` job with the same Airflow run identity.
+
+The Airflow-coordinated stage contract is internal to the local Compose stack:
+`extract_text` (pypdf or bounded Tesseract OCR) → `structured_extract` →
+`schema_validate` → `financial_validate` → `summarize`. The stage endpoint
+requires the persisted `job_id`, `dag_id`, and `run_id`; an out-of-order or
+foreign request returns a visible conflict. Provider failures, malformed model
+JSON, schema violations, OCR failures, and summary failures retain their
+classified error code and correlation IDs. Extraction has one Airflow retry;
+structured extraction and summary each have one bounded Go/provider retry;
+schema and financial validation are deterministic and are not Airflow-retried.
+
+The financial schema is `financial-v1`: amounts/quantities are decimal
+strings, dates are `YYYY-MM-DD`, currency is a three-letter uppercase code,
+and absent nullable values are normalized to JSON `null`. The deterministic
+validation policy is `financial-validation-v1` with a persisted `0.01` amount
+tolerance; it uses exact decimal arithmetic and emits stable rule IDs.
+The synthetic labeled set and separate field/validation/operational scoring
+dimensions are documented in
+[`DOCUMENT_INTELLIGENCE_EVALUATION.md`](DOCUMENT_INTELLIGENCE_EVALUATION.md).
 
 ## Chat and traces (RB-09–RB-12 implemented)
 

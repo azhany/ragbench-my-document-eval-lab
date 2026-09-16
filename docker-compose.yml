@@ -39,7 +39,10 @@ x-airflow-common: &airflow-common
     UPLOAD_DIR: /data/uploads
     MAX_EXTRACTED_CHARS: ${MAX_EXTRACTED_CHARS:-2000000}
     MAX_DOCX_EXPANDED_BYTES: ${MAX_DOCX_EXPANDED_BYTES:-104857600}
+    MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-25000000}
+    OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-30}
     EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-16}
+    RAGBENCH_API_URL: http://backend:8080
     # RB-23 is deliberately opt-in; leaving this false creates no provider
     # traffic from the scheduled regression DAG.
     RAGBENCH_SCHEDULE_ENABLED: ${RAGBENCH_SCHEDULE_ENABLED:-false}

@@ -1,0 +1,13 @@
+ACME SDN BHD
+INVOICE
+Invoice Number: INV-2026-001
+Invoice Date: 2026-01-15
+Due Date: 2026-02-14
+Currency: MYR
+
+Description | Quantity | Unit Price | Amount
+Widget A    | 2        | 50.00      | 100.00
+
+Subtotal: 100.00
+Tax: 6.00
+Total: 106.00

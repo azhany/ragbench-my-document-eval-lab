@@ -29,10 +29,13 @@ type DocumentStore interface {
 	Delete(context.Context, string) error
 }
 type DocumentOptions struct {
-	Store      DocumentStore
-	Dispatcher documents.Dispatcher
-	UploadDir  string
-	MaxBytes   int64
+	Store              DocumentStore
+	Dispatcher         documents.Dispatcher
+	UploadDir          string
+	MaxBytes           int64
+	AnalysisStore      AnalysisStore
+	AnalysisDispatcher AnalysisDispatcher
+	AnalysisRunner     AnalysisRunner
 }
 
 func validFilename(name string) bool {
@@ -54,6 +57,10 @@ func uploadMIME(name string) string {
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	case ".txt":
 		return "text/plain"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
 	}
 	return ""
 }
@@ -119,7 +126,7 @@ func (s *server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		u.Filename = params["filename"]
 		u.MIMEType = uploadMIME(u.Filename)
 		if u.MIMEType == "" {
-			writeError(w, 415, "unsupported_format", "supported file formats are PDF, DOCX and UTF-8 TXT", nil)
+			writeError(w, 415, "unsupported_format", "supported file formats are PDF, DOCX, UTF-8 TXT, JPG, JPEG and PNG", nil)
 			return
 		}
 		targetPath := filepath.Join(opts.UploadDir, u.ID+strings.ToLower(filepath.Ext(u.Filename)))

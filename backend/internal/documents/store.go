@@ -269,5 +269,14 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	if _, err = tx.Exec(ctx, `UPDATE index_revisions SET status='failed',error_code='document_deleted' WHERE document_id=$1 AND status='pending'`, id); err != nil {
 		return err
 	}
+	// Sprint 7 analyses share the same immutable document identity. Tombstoning
+	// a source fences both indexing and document-intelligence workers so a late
+	// OCR/provider response cannot publish a result for a deleted document.
+	if _, err = tx.Exec(ctx, `UPDATE document_analyses SET job_state='cancelled',status='cancelled',
+		error_code='document_deleted',error_message='Document deleted; analysis output is discarded',
+		finished_at=now(),updated_at=now()
+		WHERE document_id=$1 AND job_state NOT IN ('succeeded','cancelled','failed')`, id); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }

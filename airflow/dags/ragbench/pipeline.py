@@ -113,7 +113,9 @@ def compute_stage(job, stage, embedder=None):
         return extract(job["storage_path"], job["mime_type"], job["source_checksum"],
                        os.getenv("UPLOAD_DIR", "/data/uploads"),
                        int(os.getenv("MAX_EXTRACTED_CHARS", "2000000")),
-                       int(os.getenv("MAX_DOCX_EXPANDED_BYTES", "104857600")))
+                       int(os.getenv("MAX_DOCX_EXPANDED_BYTES", "104857600")),
+                       int(os.getenv("MAX_IMAGE_PIXELS", "25000000")),
+                       int(os.getenv("OCR_TIMEOUT_SECONDS", "30")))
     if stage == "normalize":
         return normalize(artifacts["extract"])
     if stage == "chunk":

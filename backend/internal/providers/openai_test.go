@@ -147,6 +147,33 @@ func TestOpenAIGenerateSuccessAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIGenerateStructuredRequestsJSONMode(t *testing.T) {
+	var received struct {
+		ResponseFormat struct {
+			Type string `json:"type"`
+		} `json:"response_format"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSON(t, w, map[string]any{
+			"model":   "gpt-4o-mini",
+			"choices": []any{map[string]any{"message": map[string]any{"content": `{"schema_version":"financial-v1","document_type":"unknown","line_items":[]}`}}},
+		})
+	}))
+	defer server.Close()
+	client := NewOpenAI("key")
+	client.BaseURL = server.URL
+	result, err := client.GenerateStructured(context.Background(), testGenerationProfile(), "return JSON", json.RawMessage(`{"type":"object"}`))
+	if err != nil || result.Text == "" {
+		t.Fatalf("GenerateStructured() = %+v, %v", result, err)
+	}
+	if received.ResponseFormat.Type != "json_object" {
+		t.Fatalf("response_format = %+v", received.ResponseFormat)
+	}
+}
+
 func TestOpenAICompatibleGenerationUsesConfiguredProviderAndEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {

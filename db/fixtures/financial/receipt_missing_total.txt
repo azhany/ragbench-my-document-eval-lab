@@ -1,0 +1,12 @@
+HARBOUR MARKET
+SALES RECEIPT
+Receipt Number: R-8842
+Invoice Date: 2026-02-03
+Currency: MYR
+
+Description | Quantity | Unit Price | Amount
+Coffee beans | 1 | 12.50 | 12.50
+
+Subtotal: 12.50
+Tax: 0.00
+The printed total is unreadable in this scan.

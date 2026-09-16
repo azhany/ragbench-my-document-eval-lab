@@ -29,6 +29,7 @@ type server struct {
 	executor     *evalrun.Executor
 	metrics      MetricsStore
 	regressions  RegressionStore
+	analysis     AnalysisOptions
 }
 
 func NewDocumentAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, readinessChecks ...health.NamedCheck) http.Handler {
@@ -88,6 +89,17 @@ func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chat
 		mux.HandleFunc("POST /api/v1/documents/{id}/retry-dispatch", s.retryDispatch)
 		mux.HandleFunc("POST /api/v1/documents/{id}/reprocess", s.reprocessDocument)
 		mux.HandleFunc("DELETE /api/v1/documents/{id}", s.deleteDocument)
+		if opts.AnalysisStore != nil {
+			mux.HandleFunc("POST /api/v1/documents/{id}/analyses", s.createAnalysis)
+			mux.HandleFunc("GET /api/v1/documents/{id}/analyses", s.listAnalysesForDocument)
+		}
+	}
+	if opts.AnalysisStore != nil {
+		mux.HandleFunc("GET /api/v1/document-analyses/{analysisId}", s.getAnalysis)
+		mux.HandleFunc("POST /api/v1/document-analyses/{analysisId}/retry-dispatch", s.retryAnalysisDispatch)
+		if opts.AnalysisRunner != nil {
+			mux.HandleFunc("POST /api/v1/document-analyses/{analysisId}/stages/{stage}", s.runAnalysisStage)
+		}
 	}
 	if eval.Datasets != nil {
 		mux.HandleFunc("POST /api/v1/eval-datasets", s.createDataset)
@@ -129,6 +141,7 @@ func newServer(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, c
 		logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces,
 		datasets: eval.Datasets, runs: eval.Runs, experiments: eval.Experiments,
 		orchestrator: eval.Orchestrator, dispatcher: eval.Dispatcher, executor: eval.Executor, metrics: eval.Metrics, regressions: eval.Regressions,
+		analysis: AnalysisOptions{Store: opts.AnalysisStore, Dispatcher: opts.AnalysisDispatcher, Runner: opts.AnalysisRunner},
 	}
 }
 
@@ -142,7 +155,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, serviceInfo{
 		Service:   ServiceName,
 		Status:    "ok",
-		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments", "/api/v1/metrics/summary", "/api/v1/regression-checks"},
+		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/document-analyses", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments", "/api/v1/metrics/summary", "/api/v1/regression-checks"},
 	})
 }
 

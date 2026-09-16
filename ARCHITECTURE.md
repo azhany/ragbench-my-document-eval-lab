@@ -123,7 +123,7 @@ The mandatory assessment path does not require retrieval. Structured financial e
 
 ### Agent semantics
 
-`DocumentIntelligenceAgent` is a small explicit orchestrator over named tools. It does not autonomously discover arbitrary tools, mutate infrastructure, or create an additional service boundary. Tool order is constrained so validation always occurs before final summary generation.
+`DocumentIntelligenceAgent` is a small explicit orchestrator over named tools. It does not autonomously discover arbitrary tools, mutate infrastructure, or create an additional service boundary. Tool order is constrained so validation always occurs before final summary generation. The public lifecycle is `POST /api/v1/documents/{id}/analyses` followed by `GET /api/v1/document-analyses/{analysisId}`; Airflow invokes the fenced stage endpoint with the persisted job/run identity.
 
 ### Evidence and reproducibility
 

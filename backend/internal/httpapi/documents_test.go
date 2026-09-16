@@ -98,6 +98,7 @@ func TestMultipartUploadValidationAndCleanup(t *testing.T) {
 		want                    int
 	}{
 		{"txt", "notes.txt", "source text", 202}, {"pdf", "notes.pdf", "%PDF test", 202}, {"docx", "notes.docx", "PK test", 202},
+		{"jpg", "receipt.jpg", "image bytes", 202}, {"png", "receipt.png", "image bytes", 202},
 		{"traversal", "../escape.txt", "text", 400}, {"windows", "C:\\escape.txt", "text", 400}, {"format", "notes.exe", "text", 415},
 		{"oversized", "notes.txt", string(bytes.Repeat([]byte("x"), 33)), 413}, {"empty", "notes.txt", "", 400},
 	} {

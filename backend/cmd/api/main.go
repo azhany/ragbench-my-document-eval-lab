@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ragbench-my/backend/internal/config"
+	"ragbench-my/backend/internal/documentintelligence"
 	"ragbench-my/backend/internal/documents"
 	"ragbench-my/backend/internal/evaldata"
 	"ragbench-my/backend/internal/evalrun"
@@ -97,6 +98,8 @@ func run(logger *slog.Logger) error {
 	metricsStore := metrics.NewStore(pool)
 	regressionStore := regression.NewStore(pool)
 	experimentStore := experiment.NewStore(pool)
+	analysisStore := documentintelligence.NewStore(pool)
+	analysisRunner := &documentintelligence.Runner{Store: analysisStore, Generator: providerRouter}
 	orchestrator := &experiment.Orchestrator{
 		Store:         experimentStore,
 		Configs:       configStore,
@@ -109,7 +112,8 @@ func run(logger *slog.Logger) error {
 	}
 	handler := httpapi.NewFullAPI(logger,
 		configStore,
-		httpapi.DocumentOptions{Store: documents.NewStore(pool), Dispatcher: documents.NewAirflow(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword), UploadDir: cfg.UploadDir, MaxBytes: cfg.MaxUploadBytes},
+		httpapi.DocumentOptions{Store: documents.NewStore(pool), Dispatcher: documents.NewAirflow(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword), UploadDir: cfg.UploadDir, MaxBytes: cfg.MaxUploadBytes,
+			AnalysisStore: analysisStore, AnalysisDispatcher: documentintelligence.NewAirflow(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword), AnalysisRunner: analysisRunner},
 		chatPipeline,
 		traceStore,
 		httpapi.EvalOptions{

@@ -13,7 +13,8 @@ class IngestionError(Exception):
         self.code = code
 
 
-def extract(path, mime_type, checksum, upload_dir, max_chars, max_expanded_bytes):
+def extract(path, mime_type, checksum, upload_dir, max_chars, max_expanded_bytes,
+            max_image_pixels=25000000, ocr_timeout_seconds=30):
     source = Path(path).resolve()
     if source.parent != Path(upload_dir).resolve():
         raise IngestionError("storage_failed", "Source is outside the upload directory")
@@ -62,6 +63,38 @@ def extract(path, mime_type, checksum, upload_dir, max_chars, max_expanded_bytes
                     if block.style and block.style.name.startswith("Heading"):
                         section = block.text
                     append(block.text, {"paragraph": number, "section": section})
+        elif mime_type in ("image/jpeg", "image/png"):
+            # Image OCR is deliberately bounded and optional at the runtime
+            # image level. A missing OCR binary is a classified extraction
+            # failure, never an empty successful document.
+            from PIL import Image, UnidentifiedImageError
+            try:
+                with Image.open(source) as opened:
+                    width, height = opened.size
+                    if width < 1 or height < 1 or width * height > max_image_pixels:
+                        raise IngestionError("image_limit", "Image dimensions exceed MAX_IMAGE_PIXELS")
+                    opened.load()
+                    image = opened.convert("RGB")
+            except IngestionError:
+                raise
+            except (UnidentifiedImageError, OSError) as exc:
+                raise IngestionError("image_unreadable", "Image bytes cannot be decoded") from exc
+            except Exception as exc:
+                raise IngestionError("image_unreadable", "Image bytes cannot be decoded") from exc
+            try:
+                import pytesseract
+                text = pytesseract.image_to_string(image, config="--psm 6", timeout=ocr_timeout_seconds)
+            except ImportError as exc:
+                raise IngestionError("ocr_unavailable", "OCR runtime is not installed") from exc
+            except Exception as exc:
+                description = (type(exc).__name__ + " " + str(exc)).lower()
+                if "notfound" in description or "tesseractnotfound" in description:
+                    raise IngestionError("ocr_unavailable", "OCR executable is not installed") from exc
+                if "timeout" in description or "timed out" in description:
+                    raise IngestionError("ocr_timeout", "OCR exceeded its bounded time limit") from exc
+                raise IngestionError("ocr_failed", "OCR could not read the image") from exc
+            append(text, {"image": 1, "width": width, "height": height,
+                          "method": "ocr", "profile": "tesseract-ocr-v1"})
         else:
             raise IngestionError("unsupported_format", "Unsupported source format")
     except IngestionError:
@@ -70,8 +103,16 @@ def extract(path, mime_type, checksum, upload_dir, max_chars, max_expanded_bytes
         # Parser exceptions can include source text; expose only the class.
         raise IngestionError("corrupt_document", f"Cannot extract document ({type(exc).__name__})") from exc
     if not any(normalize_text(item["text"]) for item in sections):
-        code = "image_only_or_empty" if mime_type == "application/pdf" else "empty_content"
-        raise IngestionError(code, "No useful text was extracted; OCR is not supported")
+        if mime_type == "application/pdf":
+            code = "image_only_or_empty"
+            message = "No useful text was extracted from the PDF"
+        elif mime_type in ("image/jpeg", "image/png"):
+            code = "image_unreadable"
+            message = "OCR produced no useful text"
+        else:
+            code = "empty_content"
+            message = "No useful text was extracted"
+        raise IngestionError(code, message)
     return sections
 
 

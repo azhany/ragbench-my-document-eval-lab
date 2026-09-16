@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from ragbench.content import IngestionError, chunk, extract, normalize
 
@@ -70,6 +71,23 @@ class ContentTests(unittest.TestCase):
                 with self.assertRaises(IngestionError) as caught:
                     self.extract_file(txt, mime)
                 self.assertEqual(caught.exception.code, code)
+
+    def test_bounded_image_ocr_path_and_unreadable_fixture(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / "receipt.png"
+            Image.new("RGB", (120, 80), "white").save(image)
+            with patch("pytesseract.image_to_string", return_value="TOTAL MYR 10.00") as ocr:
+                sections = self.extract_file(image, "image/png")
+            self.assertIn("TOTAL MYR", sections[0]["text"])
+            ocr.assert_called_once()
+
+            corrupt = root / "corrupt.png"
+            corrupt.write_bytes(b"not an image")
+            with self.assertRaises(IngestionError) as caught:
+                self.extract_file(corrupt, "image/png")
+            self.assertEqual(caught.exception.code, "image_unreadable")
 
 
 if __name__ == "__main__":
