@@ -56,10 +56,25 @@ which explains the prior OpenAI HTTP 401 result.
   `corrupt_document`.
 - An isolated synthetic-only Go chat run performed a real Hugging Face query
   embedding, retrieved two ranked chunks, built the prompt, and called the
-  OpenCode-compatible client. OpenCode returned HTTP 429; the API returned
-  `model_rate_limited` with trace `25a542c2-9c91-4bc6-8c75-5c57d6a831bc`.
-  The persisted trace contains request, query_embedding, retrieval,
-  prompt_build, and llm_generation spans. Embedding usage/cost is correctly null.
+  OpenCode-compatible client. At the time of that run OpenCode returned HTTP
+  429; the API returned `model_rate_limited` with trace
+  `25a542c2-9c91-4bc6-8c75-5c57d6a831bc`. The persisted trace contains request,
+  query_embedding, retrieval, prompt_build, and llm_generation spans.
+  Embedding usage/cost is correctly null.
+
+## OpenCode 429 re-verification (2026-09-16)
+
+- A fresh synthetic request to the configured OpenCode Go endpoint returned
+  HTTP 200 (no `Retry-After`) for `glm-5.3-flash`; the compatible endpoint,
+  bearer authentication, user-agent, and `x-opencode-session` routing were all
+  accepted.
+- The response had one completed choice, `finish_reason=stop`, and reported
+  prompt/completion usage. A controlled synthetic prompt also produced the
+  expected citation marker.
+- Therefore the earlier HTTP 429 is no longer reproducible and should not be
+  treated as the current provider blocker. A grounded application chat still
+  needs an authorized run that permits retrieved database chunks to be sent to
+  the provider; no such payload was transmitted during this re-check.
 
 ## Criteria status
 
@@ -67,9 +82,11 @@ which explains the prior OpenAI HTTP 401 result.
 - RB-08: provider-backed lifecycle passes; browser walkthrough and successful
   trace-history inspection remain open.
 - RB-09: all acceptance criteria and verification checks pass.
-- RB-10: controlled criteria pass; successful real answer/citations remains
-  blocked by OpenCode Go HTTP 429.
-- RB-11: cost/persistence/error criteria pass and a real classified error trace
-  is verified; successful answer trace and post-delete trace walkthrough remain open.
-- RB-12: component criteria pass; successful provider/browser walkthrough
-  remains open. Computer-use inventory reported no browser surfaces.
+- RB-10: OpenAI-compatible contract and live synthetic generation pass; a
+  grounded answer/citations smoke remains to be authorized.
+- RB-11: cost/persistence/error criteria and the prior classified 429 trace
+  pass; a current successful application trace and post-delete walkthrough
+  remain open.
+- RB-12: component criteria pass and the live provider 429 blocker is cleared;
+  successful browser walkthrough remains open because no browser surface was
+  available.
