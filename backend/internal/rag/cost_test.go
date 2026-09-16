@@ -89,6 +89,17 @@ func TestComputeCostUnknownGenerationModelUnavailable(t *testing.T) {
 	}
 }
 
+func TestComputeCostOpenCodeGoGenerationRate(t *testing.T) {
+	embedTokens, inputTokens, outputTokens := 10, 1000, 200
+	result := computeCost("openai", "text-embedding-3-small", &embedTokens,
+		"opencode-go", "glm-5.3-flash", &inputTokens, &outputTokens)
+	// 10*0.02/1M + 1000*0.15/1M + 200*0.50/1M = 0.0002502,
+	// rounded to the persisted six decimal places.
+	if result.Cost == nil || *result.Cost != 0.00025 {
+		t.Fatalf("cost = %v, want 0.00025", result.Cost)
+	}
+}
+
 func TestComputeCostUnknownProviderUnavailable(t *testing.T) {
 	embedTokens, inputTokens, outputTokens := 34, 1102, 284
 	result := computeCost("other", "some-embedder", &embedTokens,

@@ -53,9 +53,11 @@ evidence referenced by historical traces and evaluations.
 - content: non-empty
 - metadata JSONB
 - content_tsv TSVECTOR: generated (`to_tsvector('simple', content)`), GIN-indexed
-- embedding VECTOR(1536): NULL until embedded; dimension pinned by migration
-  `0003_doc_chunks.sql` — changing it requires a new migration that alters the
-  column, rebuilds the HNSW index, and creates new index revisions
+- embedding VECTOR: NULL until embedded; migration `0008` removes the original
+  1536 typmod so registered profiles can retain their native dimensions.
+  Publication verifies every vector against its revision identity. Partial
+  HNSW expression indexes cover the registered 1536d and 384d profiles; adding
+  another dimension requires an explicit companion index migration.
 - created_at
 
 Retrieval indexes: HNSW on `embedding vector_cosine_ops`, GIN on
@@ -108,8 +110,10 @@ creates a new configuration identity under a new name (migration
 - top_k: 1–100
 - rerank_enabled
 - prompt_version: registry-governed (`backend/internal/providers`, currently `v1`)
-- model_profile: registry-governed (currently `openai-gpt-4o-mini`)
-- embedding_profile: registry-governed key (currently `openai-text-embedding-3-small`)
+- model_profile: registry-governed (`openai-gpt-4o-mini` or
+  `opencode-go-glm-5.3-flash`)
+- embedding_profile: registry-governed key (`openai-text-embedding-3-small` or
+  `huggingface-bge-small-en-v1.5`)
 - embedding_provider, embedding_model, embedding_dimensions: resolved identity
   persisted at creation so the exact embedding identity survives registry
   changes; must stay compatible with `index_revisions`

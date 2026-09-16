@@ -51,12 +51,15 @@ def wait_document(doc):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expect-missing-key", action="store_true")
+    parser.add_argument("--chat", action="store_true",
+                        help="also verify grounded chat, persisted trace, and retained historical evidence")
     args = parser.parse_args()
     suffix = uuid.uuid4().hex[:8]
     _, config = request("POST", "/api/v1/rag-configs", {
         "name": "sprint2-smoke-" + suffix, "chunk_size": 80, "chunk_overlap": 10,
         "retrieval_mode": "vector", "top_k": 5, "prompt_version": "v1",
-        "model_profile": "openai-gpt-4o-mini", "embedding_profile": "openai-text-embedding-3-small",
+        "model_profile": os.getenv("SMOKE_MODEL_PROFILE", "openai-gpt-4o-mini"),
+        "embedding_profile": os.getenv("SMOKE_EMBEDDING_PROFILE", "openai-text-embedding-3-small"),
     })
     from docx import Document
     from pypdf import PdfWriter
@@ -83,6 +86,23 @@ def main():
         else:
             assert result["status"] == "processed" and result["chunk_count"] > 0, result
     assert wait_document(bad)["job"]["error_code"] == "corrupt_document"
+
+    trace_id = None
+    if args.chat:
+        if args.expect_missing_key:
+            raise RuntimeError("--chat requires real successful embeddings")
+        status, chat = request("POST", "/api/v1/chat", {
+            "question": "What must happen before publication?", "config_id": config["id"],
+        })
+        assert status == 200 and chat["answer"] and chat["citations"], chat
+        trace_id = chat["trace"]["trace_id"]
+        _, trace = request("GET", "/api/v1/traces/" + trace_id)
+        assert trace["success"] is True and trace["answer"] == chat["answer"], trace
+        assert trace["config"]["id"] == config["id"] and trace["context_snapshot"], trace
+        assert {"query_embedding", "retrieval", "prompt_build", "llm_generation", "citation_mapping"}.issubset(
+            {span["span_name"] for span in trace["spans"]}), trace
+        print(json.dumps({"event": "chat_verified", "trace_id": trace_id,
+                          "citation_count": len(chat["citations"])}), flush=True)
     status, replacement = request("POST", f"/api/v1/documents/{docs[0]['id']}/reprocess", {"config_id": config["id"]})
     assert status == 202 and replacement["job"]["dag_id"] == "document_reindex", replacement
     if not args.expect_missing_key:
@@ -103,9 +123,14 @@ def main():
     assert request("DELETE", f"/api/v1/documents/{docs[0]['id']}")[0] == 204
     _, listing = request("GET", "/api/v1/documents")
     assert docs[0]["id"] not in [doc["id"] for doc in listing["documents"]]
+    if trace_id:
+        _, retained = request("GET", "/api/v1/traces/" + trace_id)
+        assert retained["context_snapshot"] and retained["config"]["id"] == config["id"], retained
+        print(json.dumps({"event": "historical_trace_retained", "trace_id": trace_id}), flush=True)
     print(json.dumps({"event": "smoke_passed", "real_provider": not args.expect_missing_key,
                       "config_id": config["id"], "documents": [doc["id"] for doc in docs],
-                      "deleted_document": docs[0]["id"], "corrupt_document": bad["id"]}), flush=True)
+                      "deleted_document": docs[0]["id"], "corrupt_document": bad["id"],
+                      "trace_id": trace_id}), flush=True)
 
 
 if __name__ == "__main__":

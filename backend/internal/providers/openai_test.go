@@ -147,6 +147,33 @@ func TestOpenAIGenerateSuccessAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleGenerationUsesConfiguredProviderAndEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if r.UserAgent() != "ragbench-my/1.0" {
+			t.Errorf("user-agent = %q", r.UserAgent())
+		}
+		if r.Header.Get("X-OpenCode-Session") == "" {
+			t.Error("x-opencode-session header is required")
+		}
+		writeJSON(t, w, map[string]any{
+			"model": "glm-5.3-flash", "choices": []any{map[string]any{
+				"message": map[string]any{"content": "Answer [1]."}}},
+			"usage": map[string]any{"prompt_tokens": 5, "completion_tokens": 3},
+		})
+	}))
+	defer server.Close()
+	client := NewOpenAICompatible("opencode-go", server.URL+"/v1", "go-key")
+	result, err := client.Generate(context.Background(), GenerationProfile{
+		Name: "opencode-go-glm-5.3-flash", Provider: "opencode-go", Model: "glm-5.3-flash",
+	}, "prompt")
+	if err != nil || result.Text != "Answer [1]." {
+		t.Fatalf("Generate() = %+v, %v", result, err)
+	}
+}
+
 func TestOpenAIGenerateClassifiesHTTPAndMalformedFailures(t *testing.T) {
 	cases := []struct {
 		name     string

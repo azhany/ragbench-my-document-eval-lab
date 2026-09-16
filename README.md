@@ -91,9 +91,14 @@ AIRFLOW__API__SECRET_KEY=ragbench-airflow-local-api-secret-change-me
 AIRFLOW__API_AUTH__JWT_SECRET=ragbench-airflow-local-jwt-secret-change-me
 
 
-# ---- provider keys (leave uncommitted; required for document embeddings) ----
+# ---- provider credentials (leave uncommitted) ----
 # OPENAI_API_KEY=
 # EMBEDDING_PROVIDER_API_KEY=
+# HF_TOKEN=
+# OPENCODE_API_KEY=
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# HUGGINGFACE_EMBEDDING_BASE_URL=https://router.huggingface.co/hf-inference/models
+# OPENAI_COMPATIBLE_BASE_URL=https://opencode.ai/zen/go/v1
 ```
 
 Notes:
@@ -148,8 +153,13 @@ Select it in Library and upload a text-bearing PDF, DOCX, or UTF-8 TXT.
 Library refreshes every five seconds while documents are listed and exposes the actual error, published chunk count,
 revision history, reprocessing, dispatch recovery, and deletion.
 
-Set `OPENAI_API_KEY` (or `EMBEDDING_PROVIDER_API_KEY`) in `.env`, then recreate
-the Airflow services to enable embeddings. Go dispatches through Airflow 3's
+Choose a registered provider profile and set its credential in `.env`, then
+recreate the backend and Airflow services. OpenAI uses `OPENAI_API_KEY` (or the
+embedding-only `EMBEDDING_PROVIDER_API_KEY`); native Hugging Face feature
+extraction uses `HF_TOKEN`/`HUGGINGFACE_API_KEY`; OpenCode Go generation uses
+`OPENCODE_API_KEY`/`GENERATION_PROVIDER_API_KEY`. The existing generic
+`EMBEDDING_PROVIDER_API_KEY` and `OPENAI_API_KEY` names remain compatible
+fallbacks. Go dispatches through Airflow 3's
 JWT/v2 API using the existing local admin credentials; keys never reach Vue.
 
 | Setting | Default | Purpose |
@@ -158,7 +168,20 @@ JWT/v2 API using the existing local admin credentials; keys never reach Vue.
 | `MAX_EXTRACTED_CHARS` | 2000000 | Extraction output guard |
 | `MAX_DOCX_EXPANDED_BYTES` | 104857600 | Expanded DOCX archive guard |
 | `EMBEDDING_BATCH_SIZE` | 16 | Embedding request batch, 1–128 chunks |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI or an explicitly selected OpenAI deployment base |
+| `HUGGINGFACE_EMBEDDING_BASE_URL` | `https://router.huggingface.co/hf-inference/models` | Native Hugging Face feature-extraction model base |
+| `OPENAI_COMPATIBLE_BASE_URL` | `https://opencode.ai/zen/go/v1` | OpenAI-compatible Chat Completions base (OpenCode Go by default) |
 | `UPLOAD_DIR` | `/data/uploads` | Same shared path in Go and Airflow |
+
+Executable provider profiles are `openai-text-embedding-3-small` (1536d),
+`huggingface-bge-small-en-v1.5` (384d), `openai-gpt-4o-mini`, and
+`opencode-go-glm-5.3-flash`. For a complete non-OpenAI provider smoke:
+
+```sh
+SMOKE_EMBEDDING_PROFILE=huggingface-bge-small-en-v1.5 \
+SMOKE_MODEL_PROFILE=opencode-go-glm-5.3-flash \
+  sh scripts/smoke-documents.sh --chat
+```
 
 The upload volume uses shared group 0 and setgid directory permissions; Go
 remains UID 10001 and Airflow UID 50000. Backend startup waits for volume setup.

@@ -101,3 +101,14 @@ New retained runtime evidence:
 
 RB-07 and RB-08 are not marked fully accepted: authentication and browser
 access still block their remaining end-to-end checks.
+
+## Provider compatibility reverification — 2026-09-16
+
+The HTTP 401 blocker was traced to OpenAI-only routing of non-OpenAI
+credentials. Native Hugging Face embedding support, a 384d pgvector migration,
+and OpenAI-compatible generation routing were added and verified. The full
+real Hugging Face TXT/DOCX/PDF lifecycle and successful replacement passed;
+SQL confirmed eight 384d ready vectors and eight FTS rows. RB-07 is now fully
+verified. RB-08 retains only browser/trace-history walkthrough gates because
+computer-use inventory still exposes no browser. Full evidence is in
+[PROVIDER_COMPATIBILITY_VERIFICATION.md](PROVIDER_COMPATIBILITY_VERIFICATION.md).

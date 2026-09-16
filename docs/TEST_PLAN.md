@@ -103,6 +103,21 @@ and mapped citations, then fetch the trace detail and compare its prompt,
 context, usage, cost, and spans with the response. No test double or
 `INSUFFICIENT_EVIDENCE` response satisfies the real-provider gate.
 
+The executable smoke can cover RB-07 through RB-11 in one run. To exercise the
+non-OpenAI integrations, configure `HF_TOKEN` and `OPENCODE_API_KEY`, rebuild
+the backend/Airflow services, and run:
+
+```sh
+SMOKE_EMBEDDING_PROFILE=huggingface-bge-small-en-v1.5 \
+SMOKE_MODEL_PROFILE=opencode-go-glm-5.3-flash \
+  sh scripts/smoke-documents.sh --chat
+```
+
+It verifies native 384d Hugging Face ingestion, compatible query embedding,
+OpenAI-compatible Chat Completions generation, citations, trace/spans, and
+historical trace context after reprocess/delete. It never prints credentials
+or provider error bodies.
+
 Browser verification opens Chat, selects a saved configuration, submits the
 same grounded question, opens a citation and persisted trace, inspects the
 historical context drawer, then exercises loading, empty retrieval, provider

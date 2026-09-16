@@ -117,6 +117,24 @@ const retrievalQuery = `
 	         c.document_id ASC, c.index_revision_id ASC, c.id ASC
 	LIMIT $3`
 
+const retrievalQuery1536 = `
+	SELECT c.id, c.document_id, c.index_revision_id, c.chunk_index, c.content,
+	       (c.embedding::vector(1536)) <=> $1::vector(1536) AS distance
+	FROM searchable_chunks($2::uuid) c
+	WHERE vector_dims(c.embedding) = 1536
+	ORDER BY (c.embedding::vector(1536)) <=> $1::vector(1536), c.chunk_index ASC,
+	         c.document_id ASC, c.index_revision_id ASC, c.id ASC
+	LIMIT $3`
+
+const retrievalQuery384 = `
+	SELECT c.id, c.document_id, c.index_revision_id, c.chunk_index, c.content,
+	       (c.embedding::vector(384)) <=> $1::vector(384) AS distance
+	FROM searchable_chunks($2::uuid) c
+	WHERE vector_dims(c.embedding) = 384
+	ORDER BY (c.embedding::vector(384)) <=> $1::vector(384), c.chunk_index ASC,
+	         c.document_id ASC, c.index_revision_id ASC, c.id ASC
+	LIMIT $3`
+
 // boundaryExists reports whether any live document currently has an active
 // ready revision compatible with the configuration's embedding identity.
 const boundaryExistsQuery = `
@@ -140,7 +158,14 @@ const boundaryExistsQuery = `
 // persist it as a span.
 func (r *Retriever) Retrieve(ctx context.Context, cfg ragconfig.Config, vector []float32) ([]Evidence, int64, *Error) {
 	start := time.Now()
-	rows, err := r.pool.Query(ctx, retrievalQuery, vectorLiteral(vector), cfg.ID, cfg.TopK)
+	query := retrievalQuery
+	switch cfg.EmbeddingDimensions {
+	case 1536:
+		query = retrievalQuery1536
+	case 384:
+		query = retrievalQuery384
+	}
+	rows, err := r.pool.Query(ctx, query, vectorLiteral(vector), cfg.ID, cfg.TopK)
 	if err != nil {
 		return nil, 0, classifyRetrievalQuery(err)
 	}

@@ -13,8 +13,8 @@ import (
 )
 
 // EmbeddingProfile identifies one embedding provider/model/dimensions
-// combination. Dimensions must match the vector column pinned in
-// db/migrations/0003_doc_chunks.sql.
+// combination. Registered dimensions must have a companion ANN index in the
+// latest database migration; publication enforces the persisted dimensions.
 type EmbeddingProfile struct {
 	Name       string
 	Provider   string
@@ -46,6 +46,12 @@ var embeddingProfiles = map[string]EmbeddingProfile{
 		Model:      "text-embedding-3-small",
 		Dimensions: 1536,
 	},
+	"huggingface-bge-small-en-v1.5": {
+		Name:       "huggingface-bge-small-en-v1.5",
+		Provider:   "huggingface",
+		Model:      "BAAI/bge-small-en-v1.5",
+		Dimensions: 384,
+	},
 }
 
 var generationProfiles = map[string]GenerationProfile{
@@ -53,6 +59,11 @@ var generationProfiles = map[string]GenerationProfile{
 		Name:     "openai-gpt-4o-mini",
 		Provider: "openai",
 		Model:    "gpt-4o-mini",
+	},
+	"opencode-go-glm-5.3-flash": {
+		Name:     "opencode-go-glm-5.3-flash",
+		Provider: "opencode-go",
+		Model:    "glm-5.3-flash",
 	},
 }
 
@@ -93,7 +104,7 @@ func PromptByVersion(version string) (Prompt, error) {
 // PricingVersion labels the explicit rate table below. Changing a rate is a
 // new pricing version: stored traces keep the version that priced them, so
 // cost comparisons never silently mix rates.
-const PricingVersion = "2026-01-openai"
+const PricingVersion = "2026-09-16-provider-rates"
 
 // PricingCurrency is the native currency of the rate table. Display code
 // must label this currency instead of assuming RM.
@@ -108,18 +119,24 @@ type ModelRate struct {
 
 // modelPrices is the only place rates live; nothing may guess a rate at a
 // call site. Models without an entry are priced as unavailable, never zero.
-var modelPrices = map[string]ModelRate{
-	"text-embedding-3-small": {InputPerMillion: 0.02},
-	"gpt-4o-mini":            {InputPerMillion: 0.15, OutputPerMillion: 0.60},
+var modelPrices = map[string]map[string]ModelRate{
+	"openai": {
+		"text-embedding-3-small": {InputPerMillion: 0.02},
+		"gpt-4o-mini":            {InputPerMillion: 0.15, OutputPerMillion: 0.60},
+	},
+	"opencode-go": {
+		"glm-5.3-flash": {InputPerMillion: 0.15, OutputPerMillion: 0.50},
+	},
 }
 
 // RateFor returns the explicit rate for one provider/model pair, reporting
 // whether pricing is known for it.
 func RateFor(provider, model string) (ModelRate, bool) {
-	if provider != "openai" {
+	prices, ok := modelPrices[provider]
+	if !ok {
 		return ModelRate{}, false
 	}
-	rate, ok := modelPrices[model]
+	rate, ok := prices[model]
 	return rate, ok
 }
 

@@ -107,8 +107,8 @@ Validation rules (explicit bounds, mirrored by database constraints in
 | `retrieval_mode` | `vector` or `hybrid` |
 | `top_k` | integer 1–100 |
 | `prompt_version` | must exist in the prompt registry (currently `v1`) |
-| `model_profile` | must exist in the model profile registry (currently `openai-gpt-4o-mini`) |
-| `embedding_profile` | must exist in the embedding profile registry (currently `openai-text-embedding-3-small`, 1536 dimensions) |
+| `model_profile` | must exist in the model profile registry (`openai-gpt-4o-mini` or `opencode-go-glm-5.3-flash`) |
+| `embedding_profile` | must exist in the embedding profile registry (`openai-text-embedding-3-small`, 1536d, or `huggingface-bge-small-en-v1.5`, 384d) |
 
 The registry lives in `backend/internal/providers`; unknown profiles and
 prompt versions are rejected, never silently accepted.
@@ -274,7 +274,9 @@ immediately. Creating a new revision fences off subsequent retries of older jobs
 
 Integration references: [Airflow 3.0.6 public API authentication](https://airflow.apache.org/docs/apache-airflow/3.0.6/security/api.html),
 [Airflow 3.0.6 REST API](https://airflow.apache.org/docs/apache-airflow/3.0.6/stable-rest-api-ref.html),
-[OpenAI create embeddings](https://developers.openai.com/api/reference/resources/embeddings/methods/create).
+[OpenAI create embeddings](https://developers.openai.com/api/reference/resources/embeddings/methods/create),
+[Hugging Face feature extraction](https://huggingface.co/docs/inference-providers/tasks/feature-extraction),
+and [OpenCode Go endpoints](https://dev.opencode.ai/docs/go/#endpoints).
 
 ## Chat and traces (RB-09–RB-12 implemented)
 
@@ -322,18 +324,25 @@ Response `200 OK`:
     "estimated_cost": 0.000336,
     "cost_currency": "USD",
     "cost_unavailable_reason": null,
-    "pricing_version": "2026-01-openai"
+    "pricing_version": "2026-09-16-provider-rates"
   }
 }
 ```
 
 The query embedding, generation input, and generation output are the three
-cost components. OpenAI rates are explicit in
+cost components. Known OpenAI and OpenCode Go rates are explicit in
 `backend/internal/providers/providers.go`, and the query total is rounded to
 six decimal places in native USD. Provider-reported token fields and
 `estimated_cost` are `null` when usage is missing or pricing is unknown;
 `cost_unavailable_reason` is then `usage_unavailable` or
 `pricing_unavailable`, never a fabricated zero.
+
+Provider selection comes from the immutable saved profiles, never from a
+request-supplied URL. The Go query path routes OpenAI profiles to the OpenAI v1
+wire contract, OpenCode Go to its OpenAI-compatible `/chat/completions`
+contract, and Hugging Face embeddings to the native feature-extraction
+contract (`inputs` in; a bare vector array out). Native Hugging Face responses
+do not report token usage, so their query cost is explicitly unavailable.
 
 Prompt `v1` includes the question and whole retrieved chunks in rank order
 until the 24,000-Unicode-character context budget. The template labels

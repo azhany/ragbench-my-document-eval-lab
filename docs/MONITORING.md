@@ -43,7 +43,7 @@ embedding_input_tokens  12
 input_tokens        1102
 output_tokens        284
 estimated_cost    USD 0.000336
-pricing_version  2026-01-openai
+pricing_version  2026-09-16-provider-rates
 ```
 
 `rag_traces` stores the exact prompt and ranked context snapshots in addition

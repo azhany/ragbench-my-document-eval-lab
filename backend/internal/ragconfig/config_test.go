@@ -45,6 +45,21 @@ func TestResolveAcceptsValidRequest(t *testing.T) {
 	}
 }
 
+func TestResolveAcceptsHuggingFaceEmbeddingAndOpenAICompatibleGeneration(t *testing.T) {
+	req := validRequest()
+	req.ModelProfile = "opencode-go-glm-5.3-flash"
+	req.EmbeddingProfile = "huggingface-bge-small-en-v1.5"
+	resolved, errs := Resolve(req)
+	if len(errs) != 0 {
+		t.Fatalf("Resolve() returned validation errors: %v", errs)
+	}
+	if resolved.EmbeddingProvider != "huggingface" ||
+		resolved.EmbeddingModel != "BAAI/bge-small-en-v1.5" ||
+		resolved.EmbeddingDimensions != 384 {
+		t.Fatalf("Hugging Face identity not resolved: %+v", resolved)
+	}
+}
+
 func TestResolveRejectsInvalidChunkBounds(t *testing.T) {
 	tests := []struct {
 		name         string

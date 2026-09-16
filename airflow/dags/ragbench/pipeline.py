@@ -12,7 +12,7 @@ import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
 from ragbench.content import IngestionError, chunk, extract, normalize
-from ragbench.embeddings import OpenAIEmbedder, embed_chunks, validate_vectors
+from ragbench.embeddings import embed_chunks, validate_vectors
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ def compute_stage(job, stage, embedder=None):
         return chunk(artifacts["normalize"], job["index_revision_id"], job["chunk_size"], job["chunk_overlap"])
     if stage == "embed":
         return embed_chunks(artifacts["chunk"], job["embedding_provider"], job["embedding_model"],
-                            job["embedding_dimensions"], embedder or OpenAIEmbedder(),
+                            job["embedding_dimensions"], embedder,
                             int(os.getenv("EMBEDDING_BATCH_SIZE", "16")))
     if stage == "publish":
         return None

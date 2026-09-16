@@ -3,6 +3,8 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,20 +71,29 @@ type Generator interface {
 	Generate(ctx context.Context, profile GenerationProfile, prompt string) (GenerationResult, error)
 }
 
-// OpenAI is the real OpenAI client used by the query path. It holds the
-// configured base URL, API key and HTTP client only — no credentials are ever
-// persisted or logged.
+// OpenAI is an OpenAI Chat Completions/Embeddings protocol client. The
+// provider identity and base URL are explicit so the same wire contract can
+// be used with OpenAI-compatible services without mislabelling their traces.
 type OpenAI struct {
-	BaseURL string
-	APIKey  string
-	Client  *http.Client
+	Provider string
+	BaseURL  string
+	APIKey   string
+	Client   *http.Client
+	Headers  map[string]string
 }
 
 func NewOpenAI(apiKey string) *OpenAI {
+	return NewOpenAICompatible("openai", "https://api.openai.com/v1", apiKey)
+}
+
+// NewOpenAICompatible creates a client for a named provider implementing the
+// OpenAI v1 embeddings and/or Chat Completions wire contract.
+func NewOpenAICompatible(provider, baseURL, apiKey string) *OpenAI {
 	return &OpenAI{
-		BaseURL: "https://api.openai.com/v1",
-		APIKey:  apiKey,
-		Client:  &http.Client{Timeout: 60 * time.Second},
+		Provider: provider,
+		BaseURL:  baseURL,
+		APIKey:   apiKey,
+		Client:   &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -96,6 +107,10 @@ func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.statu
 // transport/validation problem is classified as embedding_failed, mirroring
 // the Airflow embedding stage.
 func (o *OpenAI) Embed(ctx context.Context, profile EmbeddingProfile, texts []string) (EmbeddingResult, error) {
+	if profile.Provider != o.provider() {
+		return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
+			Message: fmt.Sprintf("embedding provider %q is not configured", profile.Provider)}
+	}
 	if o.APIKey == "" {
 		return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
 			Message: "embedding API key is not configured in the API service"}
@@ -117,10 +132,10 @@ func (o *OpenAI) Embed(ctx context.Context, profile EmbeddingProfile, texts []st
 		switch {
 		case errors.As(err, &herr):
 			return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-				Message: fmt.Sprintf("OpenAI embeddings returned HTTP %d", herr.status)}
+				Message: fmt.Sprintf("%s embeddings returned HTTP %d", o.label(), herr.status)}
 		default:
 			return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-				Message: classifyTransport(err, "OpenAI embeddings")}
+				Message: classifyTransport(err, o.label()+" embeddings")}
 		}
 	}
 
@@ -136,35 +151,35 @@ func (o *OpenAI) Embed(ctx context.Context, profile EmbeddingProfile, texts []st
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-			Message: "OpenAI embeddings response is not valid JSON"}
+			Message: o.label() + " embeddings response is not valid JSON"}
 	}
 	if out.Model != profile.Model {
 		return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-			Message: "OpenAI embeddings response model differs from the persisted profile"}
+			Message: o.label() + " embeddings response model differs from the persisted profile"}
 	}
 	if out.Usage.PromptTokens != nil && *out.Usage.PromptTokens < 0 {
 		return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-			Message: "OpenAI embeddings returned a negative token count"}
+			Message: o.label() + " embeddings returned a negative token count"}
 	}
 	if len(out.Data) != len(texts) {
 		return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-			Message: "OpenAI embeddings returned the wrong number of vectors"}
+			Message: o.label() + " embeddings returned the wrong number of vectors"}
 	}
 	vectors := make([][]float32, len(out.Data))
 	for i, item := range out.Data {
 		if item.Index != i {
 			return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-				Message: "OpenAI embeddings response indexes are missing or duplicated"}
+				Message: o.label() + " embeddings response indexes are missing or duplicated"}
 		}
 		if len(item.Embedding) != profile.Dimensions {
 			return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-				Message: fmt.Sprintf("OpenAI embeddings vector dimensions must equal %d", profile.Dimensions)}
+				Message: fmt.Sprintf("%s embeddings vector dimensions must equal %d", o.label(), profile.Dimensions)}
 		}
 		vector := make([]float32, len(item.Embedding))
 		for j, v := range item.Embedding {
 			if math.IsNaN(v) || math.IsInf(v, 0) || v > math.MaxFloat32 || v < -math.MaxFloat32 {
 				return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-					Message: "OpenAI embeddings returned invalid vector values"}
+					Message: o.label() + " embeddings returned invalid vector values"}
 			}
 			vector[j] = float32(v)
 		}
@@ -177,7 +192,7 @@ func (o *OpenAI) Embed(ctx context.Context, profile EmbeddingProfile, texts []st
 		}
 		if !nonzero {
 			return EmbeddingResult{}, &ProviderError{Code: ErrCodeEmbeddingFailed,
-				Message: "OpenAI embeddings returned a zero vector, unusable for cosine search"}
+				Message: o.label() + " embeddings returned a zero vector, unusable for cosine search"}
 		}
 		vectors[i] = vector
 	}
@@ -188,6 +203,10 @@ func (o *OpenAI) Embed(ctx context.Context, profile EmbeddingProfile, texts []st
 // failure taxonomy distinguishes timeout, rate limiting, malformed responses
 // and other provider failures so traces can classify them.
 func (o *OpenAI) Generate(ctx context.Context, profile GenerationProfile, prompt string) (GenerationResult, error) {
+	if profile.Provider != o.provider() {
+		return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
+			Message: fmt.Sprintf("generation provider %q is not configured", profile.Provider)}
+	}
 	if o.APIKey == "" {
 		return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
 			Message: "generation API key is not configured in the API service"}
@@ -215,10 +234,10 @@ func (o *OpenAI) Generate(ctx context.Context, profile GenerationProfile, prompt
 				Message: "generation provider returned HTTP 429 rate limiting"}
 		case errors.As(err, &herr):
 			return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
-				Message: fmt.Sprintf("OpenAI chat completions returned HTTP %d", herr.status)}
+				Message: fmt.Sprintf("%s chat completions returned HTTP %d", o.label(), herr.status)}
 		default:
 			return GenerationResult{}, &ProviderError{Code: ErrCodeModelFailed,
-				Message: classifyTransport(err, "OpenAI chat completions")}
+				Message: classifyTransport(err, o.label()+" chat completions")}
 		}
 	}
 
@@ -285,6 +304,13 @@ func (o *OpenAI) post(ctx context.Context, path string, body []byte) ([]byte, er
 	}
 	req.Header.Set("Authorization", "Bearer "+o.APIKey)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "ragbench-my/1.0")
+	if o.provider() == "opencode-go" {
+		req.Header.Set("X-OpenCode-Session", newSessionID())
+	}
+	for name, value := range o.Headers {
+		req.Header.Set(name, value)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -300,6 +326,28 @@ func (o *OpenAI) post(ctx context.Context, path string, body []byte) ([]byte, er
 		return nil, &httpStatusError{status: resp.StatusCode}
 	}
 	return raw, nil
+}
+
+func newSessionID() string {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return fmt.Sprintf("ragbench-%d", time.Now().UnixNano())
+	}
+	return "ragbench-" + hex.EncodeToString(id[:])
+}
+
+func (o *OpenAI) provider() string {
+	if o.Provider == "" {
+		return "openai"
+	}
+	return o.Provider
+}
+
+func (o *OpenAI) label() string {
+	if o.provider() == "openai" {
+		return "OpenAI"
+	}
+	return o.provider()
 }
 
 func isTimeout(err error) bool {

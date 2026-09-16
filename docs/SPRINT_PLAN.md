@@ -7,10 +7,12 @@ Status: implementation in progress. Story files record current completion and ou
 The original planning baseline was design documents, a banner-only Go entry point,
 and partial Compose configuration. Sprint 1 has since delivered the foundation.
 Sprint 2 implementation and verification are recorded in
-[SPRINT_2_VERIFICATION.md](SPRINT_2_VERIFICATION.md); the real-provider and browser
-exit gates remain open. Documentation/scaffolding alone never count as completion.
-Sprint 3 implementation and open verification gates are recorded in the
-RB-09–RB-12 story files; authorized provider and successful browser gates
+[SPRINT_2_VERIFICATION.md](SPRINT_2_VERIFICATION.md); native Hugging Face
+provider verification passes and the browser exit gate remains open.
+Documentation/scaffolding alone never count as completion. Sprint 3
+implementation and open verification gates are recorded in the RB-09–RB-12
+story files; real query embedding/retrieval and classified provider failure
+pass, while successful generation (OpenCode Go HTTP 429) and browser gates
 remain open.
 
 Proposed cadence: six two-week iterations. This is a sequencing proposal, not a twelve-week delivery commitment: team capacity, provider access, and actual velocity are unknown. At sprint planning, select a dependency-complete subset that fits capacity; split large stories along their acceptance criteria rather than declaring partial features done.

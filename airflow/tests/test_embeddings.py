@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import patch
+import json
 from ragbench.content import IngestionError
-from ragbench.embeddings import embed_chunks, validate_vectors
+from ragbench.embeddings import HuggingFaceEmbedder, embed_chunks, validate_vectors
 
 
 class ProviderDouble:
@@ -15,6 +17,20 @@ class ProviderDouble:
         vector = [0.1] * (dimensions - 1 if self.failure == "dimensions" else dimensions)
         return {"model": model, "data": [{"index": i, "embedding": vector} for i in reversed(range(len(texts)))],
                 "usage": {"prompt_tokens": len(texts)}}
+
+
+class ResponseDouble:
+    def __init__(self, body):
+        self.body = json.dumps(body).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return self.body
 
 
 class EmbeddingTests(unittest.TestCase):
@@ -33,6 +49,25 @@ class EmbeddingTests(unittest.TestCase):
         for vector in ([0, 0], [float("nan"), 1], [float("inf"), 1], [True, 1], [1e39, 1], [1]):
             with self.assertRaises(IngestionError):
                 validate_vectors([vector], 1, 2)
+
+    def test_huggingface_profile_accepts_native_dimensions_and_missing_usage(self):
+        chunks = [{"content": "a"}, {"content": "b"}]
+        vectors = [[0.1] * 384, [0.2] * 384]
+        with patch("ragbench.embeddings.urlopen", return_value=ResponseDouble(vectors)) as request:
+            result = embed_chunks(chunks, "huggingface", "BAAI/bge-small-en-v1.5", 384,
+                                  HuggingFaceEmbedder(base_url="https://hf.test/models", api_key="hf-test"), 2)
+        self.assertEqual([len(vector) for vector in result["vectors"]], [384, 384])
+        self.assertIsNone(result["prompt_tokens"])
+        sent = request.call_args.args[0]
+        self.assertEqual(sent.full_url,
+                         "https://hf.test/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction")
+        self.assertEqual(json.loads(sent.data), {"inputs": ["a", "b"], "normalize": True})
+
+    def test_rejects_unregistered_provider_model_dimension_tuple(self):
+        with self.assertRaises(IngestionError) as caught:
+            embed_chunks([{"content": "a"}], "huggingface", "unknown/model", 384,
+                         ProviderDouble(), 1)
+        self.assertEqual(caught.exception.code, "embedding_failed")
 
 
 if __name__ == "__main__":

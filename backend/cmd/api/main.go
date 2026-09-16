@@ -60,11 +60,21 @@ func run(logger *slog.Logger) error {
 	}
 	configStore := ragconfig.NewStore(pool)
 	traceStore := trace.NewStore(pool)
+	providerRouter := &providers.Router{
+		Embedders: map[string]providers.Embedder{
+			"openai":      providers.NewOpenAICompatible("openai", cfg.OpenAIBaseURL, cfg.OpenAIEmbeddingAPIKey),
+			"huggingface": providers.NewHuggingFace(cfg.HuggingFaceEmbeddingBaseURL, cfg.HuggingFaceAPIKey),
+		},
+		Generators: map[string]providers.Generator{
+			"openai":      providers.NewOpenAICompatible("openai", cfg.OpenAIBaseURL, cfg.OpenAIGenerationAPIKey),
+			"opencode-go": providers.NewOpenAICompatible("opencode-go", cfg.OpenAICompatibleBaseURL, cfg.OpenAICompatibleAPIKey),
+		},
+	}
 	chatPipeline := &rag.Pipeline{
 		Configs:   configStore,
 		Retriever: rag.NewRetriever(pool),
-		Embedder:  providers.NewOpenAI(cfg.EmbeddingAPIKey),
-		Generator: providers.NewOpenAI(cfg.GenerationAPIKey),
+		Embedder:  providerRouter,
+		Generator: providerRouter,
 		Traces:    traceStore,
 	}
 	handler := httpapi.NewFullAPI(logger,

@@ -51,6 +51,13 @@ func vector1536(first, second float32) []float32 {
 	return vector
 }
 
+func vector384(first, second float32) []float32 {
+	vector := make([]float32, 384)
+	vector[0] = first
+	vector[1] = second
+	return vector
+}
+
 func insertDocumentRevision(t *testing.T, pool *pgxpool.Pool, cfg ragconfig.Config, active bool, deleted bool, provider, model string, vectorValues ...[]float32) (string, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -191,6 +198,33 @@ func TestRetrieveStageTimingIsNonNegative(t *testing.T) {
 	}
 	if duration < 0 {
 		t.Fatalf("duration = %d, must be non-negative", duration)
+	}
+}
+
+func TestRetrieveSupportsHuggingFaceNativeDimensions(t *testing.T) {
+	dsn := os.Getenv("RAGBENCH_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("RAGBENCH_TEST_DATABASE_URL not set; skipping retrieval integration tests")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	defer pool.Close()
+	cfg, err := ragconfig.NewStore(pool).Create(context.Background(), ragconfig.CreateRequest{
+		Name: fmt.Sprintf("hf-retrieval-%s", uuid.NewString()[:8]), ChunkSize: 500,
+		ChunkOverlap: 80, RetrievalMode: ragconfig.RetrievalModeVector, TopK: 2,
+		PromptVersion: "v1", ModelProfile: "opencode-go-glm-5.3-flash",
+		EmbeddingProfile: "huggingface-bge-small-en-v1.5",
+	})
+	if err != nil {
+		t.Fatalf("create Hugging Face config: %v", err)
+	}
+	insertDocumentRevision(t, pool, cfg, true, false, cfg.EmbeddingProvider, cfg.EmbeddingModel,
+		vector384(1, 0), vector384(0, 1))
+	evidence, _, retrievalErr := NewRetriever(pool).Retrieve(context.Background(), cfg, vector384(1, 0))
+	if retrievalErr != nil || len(evidence) != 2 || evidence[0].Distance != 0 {
+		t.Fatalf("384d retrieval = %+v, %v", evidence, retrievalErr)
 	}
 }
 
