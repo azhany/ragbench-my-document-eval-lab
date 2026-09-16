@@ -22,7 +22,8 @@ CREATE TABLE experiments (
     -- Requested matrix dimensions exactly as submitted:
     -- {"chunk_sizes": [...], "chunk_overlaps": [...], "top_ks": [...],
     --  "retrieval_modes": [...], "prompt_versions": [...],
-    --  "model_profiles": [...]} — rerank is reserved for RB-25.
+    --  "model_profiles": [...], "rerank_enabled": [...],
+    --  "reranker_profiles": [...], "rerank_candidate_limits": [...]}.
     requested_matrix JSONB NOT NULL,
     -- Explicit expansion cap; submissions above it are rejected.
     combination_limit INTEGER NOT NULL

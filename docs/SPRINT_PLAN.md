@@ -165,7 +165,7 @@ Every story inherits the [shared definition of ready and done](#5-shared-definit
 | Golden dataset maintenance; per-case and aggregate metrics | RB-13–RB-16 |
 | Baseline comparison and explicit regression flags | RB-19, RB-20, RB-23 |
 | Chunk size, overlap, top-k, vector/hybrid, prompt, model profile | RB-03, RB-08, RB-17, RB-18, RB-20 |
-| Optional reranking and optional nDCG@K | RB-25 and RB-26; explicitly deferred unless selected |
+| Optional reranking and optional nDCG@K | RB-25 and RB-26; selected and implemented in this continuation |
 | Ingestion, reindex, evaluation, parameter-sweep DAGs | RB-05–RB-08, RB-14, RB-18 |
 | Scheduled regression checks | RB-23 |
 | Quality/reliability/performance/cost monitoring | RB-11, RB-15, RB-19, RB-21, RB-22 |

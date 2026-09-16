@@ -264,6 +264,7 @@ type Result struct {
 	QueryErrorMessage     string    `json:"query_error_message"`
 	RecallK               *float64  `json:"recall_k"`
 	MRR                   *float64  `json:"mrr"`
+	NDCG                  *float64  `json:"ndcg_k"`
 	AnswerRelevance       *int      `json:"answer_relevance"`
 	RelevanceRationale    string    `json:"answer_relevance_rationale"`
 	Groundedness          *int      `json:"groundedness"`
@@ -290,7 +291,7 @@ func (s *Store) GetResults(ctx context.Context, runID string) ([]Result, error) 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, eval_case_id, case_key, status, dataset_version,
 		       COALESCE(trace_id, ''), COALESCE(query_error_code, ''), COALESCE(query_error_message, ''),
-		       recall_k, mrr,
+		       recall_k, mrr, ndcg_k,
 		       answer_relevance, COALESCE(answer_relevance_rationale, ''),
 		       groundedness, COALESCE(groundedness_rationale, ''),
 		       citation_correct, COALESCE(evaluator_error, ''),
@@ -307,7 +308,7 @@ func (s *Store) GetResults(ctx context.Context, runID string) ([]Result, error) 
 		var r Result
 		if err := rows.Scan(&r.ID, &r.EvalCaseID, &r.CaseKey, &r.Status, &r.DatasetVersion,
 			&r.TraceID, &r.QueryErrorCode, &r.QueryErrorMessage,
-			&r.RecallK, &r.MRR,
+			&r.RecallK, &r.MRR, &r.NDCG,
 			&r.AnswerRelevance, &r.RelevanceRationale,
 			&r.Groundedness, &r.GroundednessRationale,
 			&r.CitationCorrect, &r.EvaluatorError,

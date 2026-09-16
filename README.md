@@ -144,6 +144,29 @@ check): against an unmigrated or mismatched database, `/readyz` returns `503`
 until `scripts/migrate.sh` has been run. See `docs/API.md` for the readiness
 response shape.
 
+### Observable PoC walkthrough (Sprint 6)
+
+After the stack is ready and provider credentials are authorized, run:
+
+```sh
+sh scripts/smoke-poc.sh
+```
+
+This seeds the reviewed corpus/dataset with real provider calls, launches a
+normal Airflow-backed evaluation, and prints durable IDs for inspection. It
+does not fabricate scores or alter comparison thresholds. Use the
+poor-retrieval procedure in `docs/TEST_PLAN.md` for the intentionally degraded
+candidate and retain the observed result, including `not_evaluable` when a
+provider or corpus prerequisite fails.
+
+Scheduled regression checks are disabled by default. Create a persisted check
+through `POST /api/v1/regression-checks`, then set
+`RAGBENCH_SCHEDULE_ENABLED=true` and an explicit `RAGBENCH_SCHEDULE_CRON` in
+`.env`, plus `RAGBENCH_SCHEDULE_CHECK_ID=<check-id>` for cron-triggered runs,
+before recreating Airflow. A manual DAG trigger can provide
+`dag_run.conf.check_id` instead. Disable the schedule after the authorized
+run.
+
 ### Document Library (Sprint 2)
 
 Run `sh scripts/migrate.sh` after starting PostgreSQL, then rebuild with

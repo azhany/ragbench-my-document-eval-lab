@@ -32,35 +32,37 @@ const (
 var (
 	ErrNotFound     = errors.New("experiment not found")
 	ErrNameConflict = errors.New("an experiment with this name already exists")
-	// ErrRerankReserved keeps the optional rerank dimension explicitly
-	// unavailable: requests that try it fail visibly and the UI reports
-	// reranking as unavailable rather than pretending it ran (RB-25).
-	ErrRerankReserved = errors.New("the rerank dimension is reserved until story RB-25 lands")
 )
 
 // Matrix enumerates the supported configuration dimensions. Chunk
 // size/overlap, top-k, vector/hybrid retrieval, prompt version and model
-// profile (PRD tuning fields). Rerank is intentionally absent.
+// profile and rerank settings (PRD tuning fields).
 type Matrix struct {
-	ChunkSizes     []int    `json:"chunk_sizes"`
-	ChunkOverlaps  []int    `json:"chunk_overlaps"`
-	TopKs          []int    `json:"top_ks"`
-	RetrievalModes []string `json:"retrieval_modes"`
-	PromptVersions []string `json:"prompt_versions"`
-	ModelProfiles  []string `json:"model_profiles"`
+	ChunkSizes            []int    `json:"chunk_sizes"`
+	ChunkOverlaps         []int    `json:"chunk_overlaps"`
+	TopKs                 []int    `json:"top_ks"`
+	RetrievalModes        []string `json:"retrieval_modes"`
+	PromptVersions        []string `json:"prompt_versions"`
+	ModelProfiles         []string `json:"model_profiles"`
+	RerankEnabled         []bool   `json:"rerank_enabled"`
+	RerankerProfiles      []string `json:"reranker_profiles"`
+	RerankCandidateLimits []int    `json:"rerank_candidate_limits"`
 }
 
 // CombinationSetting is one concrete expanded matrix cell: a complete
 // immutable configuration payload (defaults inherited from the base config,
 // overrides applied). Persisted before execution.
 type CombinationSetting struct {
-	ChunkSize        int    `json:"chunk_size"`
-	ChunkOverlap     int    `json:"chunk_overlap"`
-	TopK             int    `json:"top_k"`
-	RetrievalMode    string `json:"retrieval_mode"`
-	PromptVersion    string `json:"prompt_version"`
-	ModelProfile     string `json:"model_profile"`
-	EmbeddingProfile string `json:"embedding_profile"`
+	ChunkSize            int    `json:"chunk_size"`
+	ChunkOverlap         int    `json:"chunk_overlap"`
+	TopK                 int    `json:"top_k"`
+	RetrievalMode        string `json:"retrieval_mode"`
+	PromptVersion        string `json:"prompt_version"`
+	ModelProfile         string `json:"model_profile"`
+	EmbeddingProfile     string `json:"embedding_profile"`
+	RerankEnabled        bool   `json:"rerank_enabled"`
+	RerankerProfile      string `json:"reranker_profile"`
+	RerankCandidateLimit int    `json:"rerank_candidate_limit"`
 }
 
 // Expand produces the cartesian product in deterministic order: every
@@ -69,7 +71,8 @@ type CombinationSetting struct {
 // persistence (validation stays visible, never silently dropped).
 func Expand(base ragconfig.Config, m Matrix) ([]CombinationSetting, error) {
 	allEmpty := len(m.ChunkSizes) == 0 && len(m.ChunkOverlaps) == 0 && len(m.TopKs) == 0 &&
-		len(m.RetrievalModes) == 0 && len(m.PromptVersions) == 0 && len(m.ModelProfiles) == 0
+		len(m.RetrievalModes) == 0 && len(m.PromptVersions) == 0 && len(m.ModelProfiles) == 0 &&
+		len(m.RerankEnabled) == 0 && len(m.RerankerProfiles) == 0 && len(m.RerankCandidateLimits) == 0
 	if allEmpty {
 		return nil, errors.New("empty matrix: declare at least one configuration dimension to tune")
 	}
@@ -87,23 +90,30 @@ func Expand(base ragconfig.Config, m Matrix) ([]CombinationSetting, error) {
 	modes := sortedUniqueStr(m.RetrievalModes, base.RetrievalMode)
 	prompts := sortedUniqueStr(m.PromptVersions, base.PromptVersion)
 	profiles := sortedUniqueStr(m.ModelProfiles, base.ModelProfile)
+	reranks := sortedUniqueBool(m.RerankEnabled, base.RerankEnabled)
+	rerankerProfiles := sortedUniqueStr(m.RerankerProfiles, base.RerankerProfile)
+	rerankLimits := sortedUnique(m.RerankCandidateLimits, base.RerankCandidateLimit)
 
-	combos := make([]CombinationSetting, 0, len(sizes)*len(overlaps)*len(topks)*len(modes)*len(prompts)*len(profiles))
+	combos := make([]CombinationSetting, 0)
 	for _, size := range sizes {
 		for _, overlap := range overlaps {
 			for _, topk := range topks {
 				for _, mode := range modes {
 					for _, prompt := range prompts {
 						for _, profile := range profiles {
-							combos = append(combos, CombinationSetting{
-								ChunkSize:        size,
-								ChunkOverlap:     overlap,
-								TopK:             topk,
-								RetrievalMode:    mode,
-								PromptVersion:    prompt,
-								ModelProfile:     profile,
-								EmbeddingProfile: base.EmbeddingProfile,
-							})
+							for _, rerank := range reranks {
+								for _, rerankerProfile := range rerankerProfiles {
+									for _, rerankLimit := range rerankLimits {
+										combos = append(combos, CombinationSetting{
+											ChunkSize: size, ChunkOverlap: overlap, TopK: topk,
+											RetrievalMode: mode, PromptVersion: prompt, ModelProfile: profile,
+											EmbeddingProfile: base.EmbeddingProfile,
+											RerankEnabled:    rerank, RerankerProfile: rerankerProfile,
+											RerankCandidateLimit: rerankLimit,
+										})
+									}
+								}
+							}
 						}
 					}
 				}
@@ -151,14 +161,17 @@ func sortedUniqueStr(in []string, fallback string) []string {
 // persisted combination setting.
 func (c CombinationSetting) configRequest(name string) ragconfig.CreateRequest {
 	return ragconfig.CreateRequest{
-		Name:             name,
-		ChunkSize:        c.ChunkSize,
-		ChunkOverlap:     c.ChunkOverlap,
-		RetrievalMode:    c.RetrievalMode,
-		TopK:             c.TopK,
-		PromptVersion:    c.PromptVersion,
-		ModelProfile:     c.ModelProfile,
-		EmbeddingProfile: c.EmbeddingProfile,
+		Name:                 name,
+		ChunkSize:            c.ChunkSize,
+		ChunkOverlap:         c.ChunkOverlap,
+		RetrievalMode:        c.RetrievalMode,
+		TopK:                 c.TopK,
+		PromptVersion:        c.PromptVersion,
+		ModelProfile:         c.ModelProfile,
+		EmbeddingProfile:     c.EmbeddingProfile,
+		RerankEnabled:        c.RerankEnabled,
+		RerankerProfile:      c.RerankerProfile,
+		RerankCandidateLimit: c.RerankCandidateLimit,
 	}
 }
 
@@ -168,6 +181,22 @@ func (c CombinationSetting) configRequest(name string) ragconfig.CreateRequest {
 // request names surface through the same mechanism.
 func validateComboSettings(base ragconfig.Config, m Matrix) error {
 	return nil
+}
+
+func sortedUniqueBool(in []bool, fallback bool) []bool {
+	seen := map[bool]bool{}
+	for _, v := range in {
+		seen[v] = true
+	}
+	if len(seen) == 0 {
+		seen[fallback] = true
+	}
+	if len(seen) == 1 {
+		for v := range seen {
+			return []bool{v}
+		}
+	}
+	return []bool{false, true}
 }
 
 var _ = json.Marshal

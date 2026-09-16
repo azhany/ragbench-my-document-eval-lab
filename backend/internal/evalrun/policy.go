@@ -6,8 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
+
 	"ragbench-my/backend/internal/comparison"
 )
+
+// ComparisonRecorder is implemented by the PostgreSQL run store. It is kept
+// optional at the HTTP seam so focused API tests need not model monitoring
+// persistence.
+type ComparisonRecorder interface {
+	RecordComparison(ctx context.Context, candidateID, baselineID, policyName string, policyVersion int, verdict any) error
+}
 
 // ErrPolicyReport records that a queried regression policy doesn't exist.
 var ErrPolicyNotFound = errors.New("regression policy not found")
@@ -35,7 +44,7 @@ func (s *Store) Policy(ctx context.Context, name string, version int) (PolicyRow
 		err = s.pool.QueryRow(ctx, latestByName, name).
 			Scan(&row.Name, &row.Version, &row.Policy, &row.QualityGainDefinition)
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return PolicyRow{}, ErrPolicyNotFound
 	}
 	return row, err
@@ -57,4 +66,17 @@ func (s *Store) Identity(ctx context.Context, id string) (comparison.FactorIdent
 		DatasetID: run.DatasetID, DatasetVersion: run.DatasetVersion,
 		Corpus: run.CorpusRevisions, ScoringK: policy.ScoringK, EvaluatorPolicy: run.EvaluatorPolicy,
 	}, nil
+}
+
+func (s *Store) RecordComparison(ctx context.Context, candidateID, baselineID, policyName string, policyVersion int, verdict any) error {
+	raw, err := json.Marshal(verdict)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO eval_comparisons (candidate_run_id, baseline_run_id, policy_name, policy_version, verdict)
+		VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (candidate_run_id, baseline_run_id, policy_name, policy_version)
+		DO UPDATE SET verdict=EXCLUDED.verdict, created_at=now()`, candidateID, baselineID, policyName, policyVersion, raw)
+	return err
 }

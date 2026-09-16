@@ -27,6 +27,9 @@ type EvaluatorPolicyVersioned struct {
 	RubricVersion string `json:"rubric_version"`
 	// ScoringK is the K used for Recall@K evaluation.
 	ScoringK int `json:"scoring_k"`
+	// NDCGPolicyVersion pins gain/discount/zero-ideal semantics even when a
+	// dataset has no graded judgments. It prevents silent policy mixing.
+	NDCGPolicyVersion string `json:"ndcg_policy_version"`
 }
 
 // ErrPolicyNotFound marks a request for an unknown rubric version.
@@ -42,7 +45,7 @@ func ResolveEvaluatorPolicy(rubricVersion string, scoringK int) (EvaluatorPolicy
 	if scoringK < MinScoringK || scoringK > MaxScoringK {
 		return EvaluatorPolicyVersioned{}, fmt.Errorf("scoring_k must be between %d and %d", MinScoringK, MaxScoringK)
 	}
-	return EvaluatorPolicyVersioned{PolicyVersion: PolicyVersion, RubricVersion: strings.TrimSpace(rubricVersion), ScoringK: scoringK}, nil
+	return EvaluatorPolicyVersioned{PolicyVersion: PolicyVersion, RubricVersion: strings.TrimSpace(rubricVersion), ScoringK: scoringK, NDCGPolicyVersion: NDCGPolicyVersion}, nil
 }
 
 // Citation scoring — citation correctness.

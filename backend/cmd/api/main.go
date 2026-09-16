@@ -19,9 +19,11 @@ import (
 	"ragbench-my/backend/internal/experiment"
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
+	"ragbench-my/backend/internal/metrics"
 	"ragbench-my/backend/internal/providers"
 	"ragbench-my/backend/internal/rag"
 	"ragbench-my/backend/internal/ragconfig"
+	"ragbench-my/backend/internal/regression"
 	"ragbench-my/backend/internal/schema"
 	"ragbench-my/backend/internal/trace"
 
@@ -78,16 +80,22 @@ func run(logger *slog.Logger) error {
 			"opencode-zen":     providers.NewOpenAICompatible("opencode-zen", cfg.OpenCodeZenBaseURL, cfg.OpenAICompatibleAPIKey),
 			"huggingface-chat": providers.NewOpenAICompatible("huggingface-chat", cfg.HuggingFaceGenerationBaseURL, cfg.HuggingFaceAPIKey),
 		},
+		Rerankers: map[string]providers.Reranker{
+			"local": providers.NewLexicalReranker(),
+		},
 	}
 	chatPipeline := &rag.Pipeline{
 		Configs:   configStore,
 		Retriever: rag.NewRetriever(pool),
 		Embedder:  providerRouter,
 		Generator: providerRouter,
+		Reranker:  providerRouter,
 		Traces:    traceStore,
 	}
 	datasetStore := evaldata.NewStore(pool)
 	runStore := evalrun.NewStore(pool)
+	metricsStore := metrics.NewStore(pool)
+	regressionStore := regression.NewStore(pool)
 	experimentStore := experiment.NewStore(pool)
 	orchestrator := &experiment.Orchestrator{
 		Store:         experimentStore,
@@ -114,6 +122,8 @@ func run(logger *slog.Logger) error {
 				Store: runStore, Datasets: datasetStore,
 				Pipeline: chatPipeline, Judger: evalrun.RubricJudge{Generator: providerRouter},
 			},
+			Metrics:     metricsStore,
+			Regressions: regressionStore,
 		},
 		health.NamedCheck{Name: "database", Check: pool.Ping},
 		health.NamedCheck{Name: "schema", Check: func(ctx context.Context) error {

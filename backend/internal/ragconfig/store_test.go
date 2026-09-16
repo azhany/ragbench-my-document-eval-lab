@@ -171,7 +171,7 @@ func TestConfigurationsAreImmutableIdentities(t *testing.T) {
 	if gotFirst.ID == gotSecond.ID {
 		t.Fatal("different settings must produce different identities")
 	}
-	if len(gotSecond.UnavailableCapabilities) != 1 || gotSecond.UnavailableCapabilities[0] != "rerank" {
-		t.Fatalf("second config should expose rerank as unavailable: %+v", gotSecond.UnavailableCapabilities)
+	if len(gotSecond.UnavailableCapabilities) != 0 {
+		t.Fatalf("second config should expose executable reranking, got unavailable: %+v", gotSecond.UnavailableCapabilities)
 	}
 }

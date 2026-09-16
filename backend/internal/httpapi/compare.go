@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 
 	"ragbench-my/backend/internal/comparison"
 	"ragbench-my/backend/internal/evalrun"
@@ -35,7 +36,16 @@ func (s *server) compareEvalRun(w http.ResponseWriter, r *http.Request) {
 	if policyName == "" {
 		policyName = DefaultRegressionPolicy
 	}
-	policyRow, err := s.runs.Policy(r.Context(), policyName, 0)
+	policyVersion := 0
+	if raw := r.URL.Query().Get("version"); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		policyVersion = parsed
+		if parseErr != nil || policyVersion < 1 {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_policy_version", "policy version must be a positive integer", nil)
+			return
+		}
+	}
+	policyRow, err := s.runs.Policy(r.Context(), policyName, policyVersion)
 	if err != nil {
 		s.writeRunError(w, err)
 		return
@@ -73,6 +83,13 @@ func (s *server) compareEvalRun(w http.ResponseWriter, r *http.Request) {
 		*candidateRegion.RecallMean > *baselineRegion.RecallMean
 
 	verdict := comparison.Compare(candidateRegion, baselineRegion, policy, compat, qualityGain)
+	if recorder, ok := s.runs.(evalrun.ComparisonRecorder); ok {
+		if err := recorder.RecordComparison(r.Context(), candidateID, baselineID, policyRow.Name, policyRow.Version, verdict); err != nil {
+			s.logger.Error("comparison persistence failed", "error", err.Error())
+			writeError(w, http.StatusInternalServerError, "persistence_failed", "comparison outcome could not be persisted", nil)
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, compareResponse{
 		CandidateID: candidateID, BaselineID: baselineID,

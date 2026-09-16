@@ -11,6 +11,15 @@ import (
 type Router struct {
 	Embedders  map[string]Embedder
 	Generators map[string]Generator
+	Rerankers  map[string]Reranker
+}
+
+func (r *Router) Rerank(ctx context.Context, profile RerankProfile, question string, candidates []RerankCandidate) (RerankResult, error) {
+	reranker := r.Rerankers[profile.Provider]
+	if reranker == nil {
+		return RerankResult{}, fmt.Errorf("reranking provider %q is not configured", profile.Provider)
+	}
+	return reranker.Rerank(ctx, profile, question, candidates)
 }
 
 func (r *Router) Embed(ctx context.Context, profile EmbeddingProfile, texts []string) (EmbeddingResult, error) {

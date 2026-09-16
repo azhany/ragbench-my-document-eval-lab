@@ -27,6 +27,8 @@ type server struct {
 	orchestrator *experiment.Orchestrator
 	dispatcher   evalrun.Dispatcher
 	executor     *evalrun.Executor
+	metrics      MetricsStore
+	regressions  RegressionStore
 }
 
 func NewDocumentAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, readinessChecks ...health.NamedCheck) http.Handler {
@@ -55,8 +57,10 @@ type EvalOptions struct {
 
 	// Dispatcher triggers the evaluation DAG; Executor runs cases through
 	// the shared pipeline and persists scores.
-	Dispatcher evalrun.Dispatcher
-	Executor   *evalrun.Executor
+	Dispatcher  evalrun.Dispatcher
+	Executor    *evalrun.Executor
+	Metrics     MetricsStore
+	Regressions RegressionStore
 }
 
 func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, eval EvalOptions, readinessChecks ...health.NamedCheck) http.Handler {
@@ -106,6 +110,16 @@ func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chat
 		mux.HandleFunc("GET /api/v1/experiments/{id}", s.getExperiment)
 		mux.HandleFunc("POST /api/v1/experiments/{id}/advance", s.advanceExperiment)
 	}
+	if eval.Metrics != nil {
+		mux.HandleFunc("GET /api/v1/metrics/summary", s.metricsSummary)
+	}
+	if eval.Regressions != nil {
+		mux.HandleFunc("POST /api/v1/regression-checks", s.createRegressionCheck)
+		mux.HandleFunc("GET /api/v1/regression-checks", s.listRegressionChecks)
+		mux.HandleFunc("GET /api/v1/regression-checks/{id}", s.getRegressionCheck)
+		mux.HandleFunc("POST /api/v1/regression-checks/{id}/start", s.startRegressionCheck)
+		mux.HandleFunc("POST /api/v1/regression-checks/{id}/finish", s.finishRegressionCheck)
+	}
 
 	return logMiddleware(logger, mux)
 }
@@ -114,7 +128,7 @@ func newServer(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, c
 	return &server{
 		logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces,
 		datasets: eval.Datasets, runs: eval.Runs, experiments: eval.Experiments,
-		orchestrator: eval.Orchestrator, dispatcher: eval.Dispatcher, executor: eval.Executor,
+		orchestrator: eval.Orchestrator, dispatcher: eval.Dispatcher, executor: eval.Executor, metrics: eval.Metrics, regressions: eval.Regressions,
 	}
 }
 
@@ -128,7 +142,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, serviceInfo{
 		Service:   ServiceName,
 		Status:    "ok",
-		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments"},
+		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments", "/api/v1/metrics/summary", "/api/v1/regression-checks"},
 	})
 }
 

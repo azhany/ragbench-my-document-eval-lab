@@ -220,6 +220,8 @@ onMounted(() => load({ initial: true }))
               <dd>{{ aggregate?.recall_mean ?? 'missing' }}</dd>
               <dt>MRR mean ({{ aggregate?.mrr_count ?? 0 }} scored)</dt>
               <dd>{{ aggregate?.mrr_mean ?? 'missing' }}</dd>
+              <dt>nDCG@K mean ({{ aggregate?.ndcg_count ?? 0 }} graded)</dt>
+              <dd>{{ aggregate?.ndcg_mean ?? 'missing' }}</dd>
               <dt>Answer relevance mean ({{ aggregate?.answer_relevance_count ?? 0 }})</dt>
               <dd>{{ aggregate?.answer_relevance_mean ?? 'missing' }}</dd>
               <dt>Groundedness mean ({{ aggregate?.groundedness_count ?? 0 }})</dt>
@@ -253,7 +255,7 @@ onMounted(() => load({ initial: true }))
         <table class="results" data-test="results">
           <thead>
             <tr>
-              <th>Case</th><th>Status</th><th>Recall@K</th><th>MRR</th>
+              <th>Case</th><th>Status</th><th>Recall@K</th><th>MRR</th><th>nDCG@K</th>
               <th>Relevance</th><th>Groundedness</th><th>Citations</th>
               <th>Latency</th><th>Trace</th>
             </tr>
@@ -264,6 +266,7 @@ onMounted(() => load({ initial: true }))
               <td :data-status="r.status">{{ r.status }}</td>
               <td>{{ r.recall_k ?? '—' }}</td>
               <td>{{ r.mrr ?? '—' }}</td>
+              <td>{{ r.ndcg_k ?? '—' }}</td>
               <td :title="r.answer_relevance_rationale">{{ r.answer_relevance ?? 'missing' }}</td>
               <td :title="r.groundedness_rationale">{{ r.groundedness ?? 'missing' }}</td>
               <td>{{ r.citation_correct ?? '—' }}</td>

@@ -1,6 +1,9 @@
 package evaluation
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func doc(id string, rank int) RetrievedEvidence { return RetrievedEvidence{DocumentID: id, Rank: rank} }
 
@@ -61,6 +64,23 @@ func TestMRR(t *testing.T) {
 				t.Fatalf("MRR = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNDCGAtK(t *testing.T) {
+	judgments := map[string]int{"a": 3, "b": 2, "c": 0}
+	got, ok := NDCGAtK(judgments, []RetrievedEvidence{doc("b", 1), doc("a", 2)}, 2)
+	if !ok {
+		t.Fatal("graded judgments should be evaluable")
+	}
+	// DCG = (2^2-1)/log2(2) + (2^3-1)/log2(3); ideal reverses the two.
+	want := ((3.0 / math.Log2(2)) + (7.0 / math.Log2(3))) /
+		((7.0 / math.Log2(2)) + (3.0 / math.Log2(3)))
+	if math.Abs(got-want) > 1e-12 {
+		t.Fatalf("nDCG = %.12f, want %.12f", got, want)
+	}
+	if _, ok := NDCGAtK(map[string]int{"zero": 0}, []RetrievedEvidence{doc("zero", 1)}, 1); ok {
+		t.Fatal("zero ideal gain must be not evaluable")
 	}
 }
 

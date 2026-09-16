@@ -143,7 +143,37 @@ successful story acceptance.
 ### Evaluation
 - Recall@K
 - MRR
+- graded nDCG@K gain/discount, ties, missing judgments and zero ideal gain
 - regression threshold evaluation
+
+## Sprint 6 and optional backlog verification
+
+The end-to-end demonstration is `sh scripts/smoke-poc.sh` after Compose is
+healthy and authorized provider credentials are configured. It seeds the
+reviewed three-source corpus and golden dataset, launches the normal Airflow
+evaluation path, and prints run IDs. Inspect the same IDs in Evaluations and
+Monitor; no sample metrics are accepted.
+
+For the poor-retrieval failure mode, create a second immutable configuration
+with a deliberately small chunk size and low top-k, reprocess the same corpus,
+and launch the same pinned dataset. Compare it with the baseline under the
+persisted policy. Record the observed Recall@K/MRR/judge values and policy
+state; if the chosen fixture does not regress, report that outcome and select
+an evidence-sensitive fixture/configuration without changing thresholds.
+
+RB-25 verification enables `rerank_enabled` with `reranker_profile=lexical-v1`
+and a candidate limit. Assert a `rerank` span, changed final order where the
+fixture has a lexical signal, and visible `rerank_failed` behavior from a
+controlled failing reranker; the disabled configuration must have no rerank
+span. RB-26 imports a case with `graded_judgments`, checks hand-calculated
+nDCG@K and confirms runs with different `ndcg_policy_version` values are not
+comparable.
+
+RB-23 verification creates an enabled persisted regression check, triggers
+one isolated `rag_scheduled_regression` interval, inspects the linked run and
+comparison, then disables it. A missing/incomplete baseline must remain
+`not_evaluable`, and local Compose must show the DAG with no automatic schedule
+when the opt-in variables are absent.
 
 ## Integration tests
 

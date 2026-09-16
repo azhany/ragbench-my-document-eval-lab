@@ -133,6 +133,7 @@ func (e *Executor) persist(ctx context.Context, run Run, golden evaldata.Case, o
 			run_id, eval_case_id, case_key, status, dataset_version,
 			trace_id, query_error_code, query_error_message,
 			recall_k, mrr,
+			ndcg_k,
 			answer_relevance, answer_relevance_rationale,
 			groundedness, groundedness_rationale,
 			citation_correct,
@@ -145,20 +146,22 @@ func (e *Executor) persist(ctx context.Context, run Run, golden evaldata.Case, o
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
 			$9,$10,
-			$11,$12,
-			$13,$14,
-			$15,
-			$16,$17,$18,
-			$19,$20,$21,
-			$22,$23,$24,
-			$25,$26,$27,
-			$28,$29
+			$11,
+			$12,$13,
+			$14,$15,
+			$16,
+			$17,$18,$19,
+			$20,$21,$22,
+			$23,$24,$25,
+			$26,$27,$28,
+			$29,$30
 		)
 		ON CONFLICT (run_id, eval_case_id) DO NOTHING
 		RETURNING id`,
 		run.ID, golden.ID, golden.CaseKey, status, run.DatasetVersion,
 		traceID, queryCode, queryMsg,
 		scores.Recall, scores.MRR,
+		scores.NDCG,
 		scores.AnswerRelevance, scores.RelevanceRationale,
 		scores.Groundedness, scores.GroundedRationale,
 		scores.CitationCorrect,
@@ -207,6 +210,7 @@ func statusFor(outcome pipelineOutcome, scores scoreInputs) string {
 // "not evaluable" and are stored as SQL NULL, never as zero.
 type scoreInputs struct {
 	Recall, MRR, CitationCorrect                any
+	NDCG                                        any
 	AnswerRelevance, Groundedness               any
 	RelevanceRationale, GroundedRationale       string
 	EvaluatorError                              string
@@ -251,6 +255,9 @@ func (e *Executor) score(ctx context.Context, run Run, golden evaldata.Case, out
 	}
 	if v, ok := evaluation.MRR(golden.ExpectedEvidence, retrieved); ok {
 		s.MRR = v
+	}
+	if v, ok := evaluation.NDCGAtK(golden.GradedJudgments, retrieved, policy.ScoringK); ok {
+		s.NDCG = v
 	}
 
 	if len(outcome.resp.Citations) > 0 {

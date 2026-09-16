@@ -79,7 +79,23 @@ FROM ingestion_jobs WHERE state='succeeded';
 For ingestion failure rate, count `failed` jobs over `succeeded + failed` jobs
 in the same time window; report dispatch failures separately, and exclude
 cancelled and in-flight jobs. Library exposes the latest job's real state/error
-and revision history. Aggregated Monitor UI belongs to later stories.
+and revision history.
+
+### Summary contract (RB-21)
+
+`GET /api/v1/metrics/summary` uses a half-open `[from,to)` storage window;
+the display timezone controls daily grouping. The default is the previous 30
+days. `traffic=query` counts chat traces and `traffic=evaluation` counts
+evaluation traces; `all` includes both. Query cost is sourced from
+`rag_traces.estimated_cost`, evaluation judge cost from
+`eval_results.evaluator_cost`, and ingestion exposes stage timing/tokens but
+no invented cost estimate. Percentiles state their populations.
+
+Quality rows are separated by dataset/version, evaluator/nDCG policy and
+currency. A missing score, zero ideal graded gain, mixed currency, empty
+window, or unknown provider usage remains unavailable. Failure summaries link
+to trace, document or eval-run detail paths. Comparison outcomes are stored
+in `eval_comparisons`, so regression count is based on actual policy verdicts.
 
 ### Implemented query classification (Sprint 3)
 
@@ -101,6 +117,7 @@ Current taxonomy:
 - `citation_missing`
 - `citation_invalid`
 - `capability_unavailable`
+- `rerank_failed`
 - `persistence_failed`
 
 Validation and unknown-configuration failures occur before a trace exists and
@@ -108,6 +125,8 @@ are still returned as structured HTTP errors. `persistence_failed` is never
 reported as a successful answer. `INSUFFICIENT_EVIDENCE` is a successful model
 outcome with zero citations, distinct from `retrieval_empty`.
 
-Trace spans currently cover `request`, `query_embedding`, `retrieval`,
-`prompt_build`, `llm_generation`, and `citation_mapping`. Reranking is
-rejected as an unavailable capability until its owning story implements it.
+Trace spans currently cover `request`, `query_embedding`, `retrieval`, an
+optional `rerank`, `prompt_build`, `llm_generation`, and `citation_mapping`.
+RB-25's deterministic `lexical-v1` reranker records candidate limit and final
+chunk order. A reranker failure is `rerank_failed`; the pipeline does not fall
+back to the pre-reranked list.

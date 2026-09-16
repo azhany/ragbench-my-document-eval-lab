@@ -319,8 +319,8 @@ func TestAskCapabilityUnavailable(t *testing.T) {
 		t.Fatalf("hybrid must not be a capability rejection; got %v", err)
 	}
 
-	// Rerank stays reserved for RB-25: rejection happens before any provider
-	// call and produces no trace.
+	// A test pipeline without the optional reranker integration rejects the
+	// request before any provider call and produces no trace.
 	rerankConfig := testConfig
 	rerankConfig.RerankEnabled = true
 	p.Configs = &fakeConfigs{config: rerankConfig}

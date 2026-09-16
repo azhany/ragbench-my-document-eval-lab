@@ -76,7 +76,7 @@ function formatDateTime(value) {
           <td>{{ cfg.chunk_size }} / {{ cfg.chunk_overlap }}</td>
           <td>
             {{ cfg.retrieval_mode }}
-            <span v-if="cfg.rerank_enabled" class="badge">rerank</span>
+            <span v-if="cfg.rerank_enabled" class="badge">{{ cfg.reranker_profile || 'rerank' }} · {{ cfg.rerank_candidate_limit || '—' }} candidates</span>
           </td>
           <td>{{ cfg.top_k }}</td>
           <td>{{ cfg.prompt_version }}</td>
@@ -91,7 +91,7 @@ function formatDateTime(value) {
               v-for="cap in cfg.unavailable_capabilities"
               :key="cap"
               class="badge unavailable"
-              :title="'Execution is rejected until the owning story lands'"
+              :title="'Execution is rejected because this capability is unavailable in the running binary'"
             >
               {{ cap }} unavailable
             </span>

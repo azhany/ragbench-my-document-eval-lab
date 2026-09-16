@@ -25,6 +25,7 @@ type Verdict struct {
 	MRRDelta        *float64 `json:"mrr_delta"`
 	LatencyP95Delta *float64 `json:"latency_p95_delta"`
 	CostDelta       *float64 `json:"cost_delta"`
+	NDCGDelta       *float64 `json:"ndcg_delta"`
 }
 
 // RegionAggregates is one run's headline aggregates for comparison.
@@ -33,6 +34,7 @@ type RegionAggregates struct {
 	MRRMean      *float64
 	LatencyP95MS *int64
 	CostTotal    *float64
+	NDCGMean     *float64
 	// Flags the pair's completeness: any run with failed or
 	// evaluator-failed cases or missing aggregate pieces is incomplete for
 	// the affected rules.
@@ -61,11 +63,13 @@ func Compare(candidate, baseline RegionAggregates, policy Policy, compat Compati
 	values := map[string]MetricValues{
 		"recall_k":    {candidate.RecallMean, baseline.RecallMean},
 		"mrr":         {candidate.MRRMean, baseline.MRRMean},
+		"ndcg_k":      {candidate.NDCGMean, baseline.NDCGMean},
 		"latency_p95": {fromIntms(candidate.LatencyP95MS), fromIntms(baseline.LatencyP95MS)},
 		"cost_total":  {candidate.CostTotal, baseline.CostTotal},
 	}
 	v.RecallDelta = deltaOf(candidate.RecallMean, baseline.RecallMean)
 	v.MRRDelta = deltaOf(candidate.MRRMean, baseline.MRRMean)
+	v.NDCGDelta = deltaOf(candidate.NDCGMean, baseline.NDCGMean)
 	v.LatencyP95Delta = deltaOf(fromIntms(candidate.LatencyP95MS), fromIntms(baseline.LatencyP95MS))
 	v.CostDelta = deltaOf(candidate.CostTotal, baseline.CostTotal)
 
@@ -80,7 +84,7 @@ func Compare(candidate, baseline RegionAggregates, policy Policy, compat Compati
 
 func orderedMetrics(policy Policy) []string {
 	// Stable ordering for reproducible response shapes.
-	metrics := []string{"recall_k", "mrr", "latency_p95", "cost_total"}
+	metrics := []string{"recall_k", "mrr", "ndcg_k", "latency_p95", "cost_total"}
 	out := make([]string, 0, len(metrics))
 	for _, m := range metrics {
 		if _, ok := policy.Rules[m]; ok {

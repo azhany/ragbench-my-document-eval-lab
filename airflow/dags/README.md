@@ -46,5 +46,11 @@ duplicates retrieval, prompt construction, generation or scoring logic):
 - `rag_parameter_sweep` (RB-18): conf `{"experiment_id": UUID}`; performs one
   idempotent `advance` step per call until the experiment is terminal; a
   failed terminal state is surfaced as task failure.
+- `rag_scheduled_regression` (RB-23): disabled unless
+  `RAGBENCH_SCHEDULE_ENABLED=true`, `RAGBENCH_SCHEDULE_CRON`, and
+  `RAGBENCH_SCHEDULE_CHECK_ID` are set. A manual trigger can supply
+  `{"check_id": UUID}` instead. It calls the existing Go evaluation and
+  comparison endpoints, persisting pass/regression/not-evaluable state. It
+  never implements a second evaluator.
 
 Keep DAGs orchestration-focused. Put reusable evaluation logic in importable Python modules rather than embedding everything in DAG definitions.

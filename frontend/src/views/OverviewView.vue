@@ -9,13 +9,28 @@ const checks = ref([
   { name: 'API liveness', path: '/healthz', state: 'pending', detail: null },
   { name: 'API readiness', path: '/readyz', state: 'pending', detail: null },
 ])
+const metricsState = ref('loading')
+const metrics = ref(null)
+const metricsError = ref(null)
 
 async function refresh() {
   for (const check of checks.value) {
     check.state = 'pending'
     check.detail = null
   }
-  await Promise.all(checks.value.map(refreshCheck))
+  await Promise.all([...checks.value.map(refreshCheck), refreshMetrics()])
+}
+
+async function refreshMetrics() {
+  metricsState.value = 'loading'
+  metricsError.value = null
+  try {
+    metrics.value = await api.get('/api/v1/metrics/summary?traffic=all&timezone=UTC')
+    metricsState.value = 'ready'
+  } catch (err) {
+    metricsError.value = err
+    metricsState.value = 'error'
+  }
 }
 
 async function refreshCheck(check) {
@@ -57,6 +72,19 @@ onMounted(refresh)
   </section>
 
   <ConfigList />
+
+  <section class="overview-metrics" data-test="overview-metrics">
+    <div class="section-head"><h2>PoC summary</h2><RouterLink to="/monitor">Open Monitor</RouterLink></div>
+    <p v-if="metricsState === 'loading'" data-state="loading">Loading persisted metrics…</p>
+    <p v-else-if="metricsState === 'error'" class="error" data-state="error">Metrics unavailable: {{ metricsError?.message }}</p>
+    <p v-else-if="!metrics" data-state="no-data">No metrics summary is available.</p>
+    <div v-else class="cards" data-state="ready">
+      <article class="card"><h3>Queries</h3><strong>{{ metrics.reliability.query_success }} / {{ metrics.reliability.query_total }}</strong><p>successful / total</p></article>
+      <article class="card"><h3>Latency p95</h3><strong>{{ metrics.performance.total_latency_p95_ms ?? 'Unavailable' }}{{ metrics.performance.total_latency_p95_ms == null ? '' : ' ms' }}</strong><p>successful traces</p></article>
+      <article class="card"><h3>Query cost</h3><strong>{{ metrics.cost.query_cost_total ?? 'Unavailable' }} {{ metrics.cost.query_cost_currency }}</strong><p>{{ metrics.cost.query_cost_population }} costed traces</p></article>
+      <article class="card"><h3>Regressions</h3><strong>{{ metrics.regression_count }}</strong><p>persisted comparison verdicts</p></article>
+    </div>
+  </section>
 </template>
 
 <style scoped>
@@ -104,4 +132,11 @@ pre {
   font-size: 0.8rem;
   margin: 0;
 }
+.overview-metrics { margin-top: 2rem; }
+.overview-metrics .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(12rem,1fr)); gap:1rem; }
+.overview-metrics .card { border:1px solid var(--border); border-radius:.5rem; padding:1rem; background:var(--surface); }
+.overview-metrics .card h3 { margin-top:0; }
+.overview-metrics strong { font-size:1.35rem; }
+.overview-metrics p { margin-bottom:0; color:var(--muted); }
+.error { color:var(--danger); }
 </style>

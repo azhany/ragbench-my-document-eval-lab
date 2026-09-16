@@ -31,6 +31,9 @@ func Observations(results []Result) []evaluation.ResultObservation {
 		if r.MRR != nil {
 			o.HasMRR, o.MRR = true, *r.MRR
 		}
+		if r.NDCG != nil {
+			o.HasNDCG, o.NDCG = true, *r.NDCG
+		}
 		if r.AnswerRelevance != nil {
 			o.HasRelevance, o.AnswerRelevance = true, *r.AnswerRelevance
 		}
@@ -74,6 +77,7 @@ func ToRegionAggregates(results []Result) comparison.RegionAggregates {
 	}
 	return comparison.RegionAggregates{
 		RecallMean: one.RecallMean, MRRMean: one.MRRMean,
+		NDCGMean:     one.NDCGMean,
 		LatencyP95MS: one.LatencyP95MS, CostTotal: one.CostTotal,
 		Complete: complete, FailureReasons: reasons,
 	}

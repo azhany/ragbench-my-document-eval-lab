@@ -51,13 +51,15 @@ type Dataset struct {
 
 // Case is one reviewed golden question with its expected evidence.
 type Case struct {
-	ID               string   `json:"id"`
-	CaseKey          string   `json:"case_key"`
-	Question         string   `json:"question"`
-	ReferenceAnswer  string   `json:"reference_answer"`
-	ExpectedEvidence []string `json:"expected_evidence"` // document ids
-	ExpectedLabels   []Label  `json:"expected_labels"`   // document id → source label
-	Notes            string   `json:"notes"`
+	ID               string         `json:"id"`
+	CaseKey          string         `json:"case_key"`
+	Question         string         `json:"question"`
+	ReferenceAnswer  string         `json:"reference_answer"`
+	ExpectedEvidence []string       `json:"expected_evidence"` // document ids
+	ExpectedLabels   []Label        `json:"expected_labels"`   // document id → source label
+	JudgmentVersion  string         `json:"judgment_version"`
+	GradedJudgments  map[string]int `json:"graded_judgments"`
+	Notes            string         `json:"notes"`
 }
 
 // Label keeps the human-readable source name next to each expected document
@@ -74,7 +76,45 @@ type CaseInput struct {
 	Question         string          `json:"question"`
 	ReferenceAnswer  string          `json:"reference_answer"`
 	ExpectedEvidence json.RawMessage `json:"expected_evidence"`
-	Notes            string          `json:"notes"`
+	JudgmentVersion  string          `json:"judgment_version"`
+	GradedJudgments  json.RawMessage `json:"graded_judgments"`
+	// relevance_judgments is accepted as a descriptive alias for imports; it
+	// is normalized to graded_judgments in the immutable stored case.
+	RelevanceJudgments json.RawMessage `json:"relevance_judgments"`
+	Notes              string          `json:"notes"`
+}
+
+func resolveGradedJudgments(raw, alias json.RawMessage, expected []string) (string, map[string]int, error) {
+	if len(raw) == 0 {
+		raw = alias
+	}
+	version := "binary-v1"
+	if len(raw) == 0 || string(raw) == "null" {
+		return version, map[string]int{}, nil
+	}
+	var grades map[string]int
+	if err := json.Unmarshal(raw, &grades); err != nil {
+		return "", nil, fmt.Errorf("graded_judgments must be an object of document id to integer grade: %v", err)
+	}
+	expectedSet := map[string]bool{}
+	for _, id := range expected {
+		expectedSet[id] = true
+	}
+	for id, grade := range grades {
+		if _, err := uuid.Parse(id); err != nil {
+			return "", nil, fmt.Errorf("graded_judgments contains malformed document id %q", id)
+		}
+		if !expectedSet[id] {
+			return "", nil, fmt.Errorf("graded_judgments document %q is not in expected_evidence", id)
+		}
+		if grade < 0 || grade > 5 {
+			return "", nil, fmt.Errorf("graded_judgments grade for %q must be between 0 and 5", id)
+		}
+	}
+	if len(grades) > 0 {
+		version = "ndcg-v1"
+	}
+	return version, grades, nil
 }
 
 // evidenceEntry is the accepted expected_evidence element shape.
@@ -185,15 +225,32 @@ func (s *Store) insertCases(ctx context.Context, tx pgx.Tx, datasetID string, ve
 		}
 		idsJSON, _ := json.Marshal(ids)
 		labelsJSON, _ := json.Marshal(labels)
+		judgmentVersion, grades, err := resolveGradedJudgments(c.GradedJudgments, c.RelevanceJudgments, ids)
+		if err != nil {
+			return fmt.Errorf("case %d (%s): %w", i+1, strings.TrimSpace(c.CaseKey), err)
+		}
+		if strings.TrimSpace(c.JudgmentVersion) != "" {
+			judgmentVersion = strings.TrimSpace(c.JudgmentVersion)
+			switch judgmentVersion {
+			case "binary-v1":
+				if len(grades) > 0 {
+					return fmt.Errorf("judgment_version binary-v1 cannot be used with graded_judgments")
+				}
+			case "ndcg-v1":
+			default:
+				return fmt.Errorf("unknown judgment_version %q", judgmentVersion)
+			}
+		}
+		gradesJSON, _ := json.Marshal(grades)
 		tag, err := tx.Exec(ctx, `
-			INSERT INTO eval_cases (dataset_id, version, case_key, question, reference_answer, expected_evidence, notes)
+			INSERT INTO eval_cases (dataset_id, version, case_key, question, reference_answer, expected_evidence, judgment_version, graded_judgments, notes)
 			VALUES ($1, $2, $3, $4, $5,
-			        jsonb_build_object('document_ids', $6::jsonb, 'labels', $7::jsonb),
-			        nullIf($8, ''))
+			        jsonb_build_object('document_ids', $6::jsonb, 'labels', $7::jsonb), $8, $9,
+			        nullIf($10, ''))
 			ON CONFLICT (dataset_id, version, case_key) DO NOTHING`,
 			datasetID, version, strings.TrimSpace(c.CaseKey),
 			strings.TrimSpace(c.Question), strings.TrimSpace(c.ReferenceAnswer),
-			idsJSON, labelsJSON, strings.TrimSpace(c.Notes),
+			idsJSON, labelsJSON, judgmentVersion, gradesJSON, strings.TrimSpace(c.Notes),
 		)
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -357,7 +414,8 @@ func (s *Store) GetVersion(ctx context.Context, datasetID string, version int) (
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, case_key, question, reference_answer, expected_evidence, COALESCE(notes, '')
+		SELECT id, case_key, question, reference_answer, expected_evidence,
+		       judgment_version, graded_judgments, COALESCE(notes, '')
 		FROM eval_cases
 		WHERE dataset_id=$1 AND version=$2
 		ORDER BY case_key`, datasetID, version)
@@ -372,8 +430,14 @@ func (s *Store) GetVersion(ctx context.Context, datasetID string, version int) (
 			DocumentIDs []string `json:"document_ids"`
 			Labels      []Label  `json:"labels"`
 		}
-		if err := rows.Scan(&c.ID, &c.CaseKey, &c.Question, &c.ReferenceAnswer, &evidence, &c.Notes); err != nil {
+		var gradesJSON json.RawMessage
+		if err := rows.Scan(&c.ID, &c.CaseKey, &c.Question, &c.ReferenceAnswer, &evidence,
+			&c.JudgmentVersion, &gradesJSON, &c.Notes); err != nil {
 			return VersionedCases{}, err
+		}
+		c.GradedJudgments = map[string]int{}
+		if len(gradesJSON) > 0 {
+			_ = json.Unmarshal(gradesJSON, &c.GradedJudgments)
 		}
 		c.ExpectedEvidence = evidence.DocumentIDs
 		c.ExpectedLabels = evidence.Labels

@@ -19,6 +19,8 @@ const matrix = ref({
   retrieval_modes: 'vector', prompt_versions: '', model_profiles: '',
 })
 const rerankRequested = ref(false)
+const rerankerProfile = ref('lexical-v1')
+const rerankCandidateLimit = ref(20)
 
 const state = ref('loading')
 const loadError = ref(null)
@@ -35,10 +37,6 @@ const compareBusy = ref(false)
 const compare = ref(null)
 const compareError = ref(null)
 
-const RUNNING_STATES = new Set(['created', 'running'])
-const unavailableRerankNote =
-  'Reranking is an optional experiment dimension that is not available yet (story RB-25); its absence is never implied as a run result.'
-
 const canCreate = computed(() => baseConfigID.value && datasetID.value && experimentName.value.trim())
 const runsOfExperiment = ref([])
 
@@ -52,6 +50,11 @@ function buildMatrix() {
   for (const [key, value] of Object.entries(matrix.value)) {
     const list = csvList(value)
     if (list.length) m[key] = list
+  }
+  if (rerankRequested.value) {
+    m.rerank_enabled = [true]
+    m.reranker_profiles = [rerankerProfile.value]
+    m.rerank_candidate_limits = [Number(rerankCandidateLimit.value) || 20]
   }
   return m
 }
@@ -89,7 +92,7 @@ async function createExperiment() {
   try {
     // Bounded matrix: the API expands and persists the combinations before
     // execution (with the explicit limit), rejecting invalid/unsupported
-    // dimensions — including the unavailable rerank dimension — visibly.
+    // dimensions, including executable reranking, visibly.
     const created = await api.post('/api/v1/experiments', {
       name: experimentName.value.trim(),
       dataset_id: datasetID.value,
@@ -175,6 +178,7 @@ const diffRows = computed(() => {
     chunk_size: 'Chunk size', chunk_overlap: 'Chunk overlap', top_k: 'Top-k',
     retrieval_mode: 'Retrieval mode', prompt_version: 'Prompt version',
     model_profile: 'Model profile', rerank_enabled: 'Rerank',
+    reranker_profile: 'Reranker profile', rerank_candidate_limit: 'Rerank candidates',
   }
   for (const [field, label] of Object.entries(labels)) {
     rows.push({ field, label, baseline: candidate[field] })
@@ -260,10 +264,13 @@ onMounted(() => load({ initial: true }))
           <label>Model profiles
             <input v-model="matrix.model_profiles" placeholder="openai-gpt-4o-mini" data-test="m-profiles" />
           </label>
-          <p class="note" data-test="rerank-note">
-            Reranking is not available yet (RB-25): it is not a selectable
-            dimension and never implied to have run.
-          </p>
+          <label><input v-model="rerankRequested" type="checkbox" data-test="rerank-enabled" /> Enable executable reranking</label>
+          <label v-if="rerankRequested">Reranker profile
+            <select v-model="rerankerProfile" data-test="reranker-profile"><option value="lexical-v1">lexical-v1 · local token overlap</option></select>
+          </label>
+          <label v-if="rerankRequested">Candidate limit
+            <input v-model="rerankCandidateLimit" type="number" min="1" max="100" data-test="rerank-limit" />
+          </label>
         </fieldset>
         <button type="submit" :disabled="createBusy || !canCreate" data-test="create-experiment">
           {{ createBusy ? 'Persisting matrix…' : 'Create experiment' }}
@@ -381,10 +388,6 @@ onMounted(() => load({ initial: true }))
       <p v-if="detail && runsOfExperiment.length === 0" data-test="no-runs-yet">
         Advances provision or execute combinations; runs appear here as the
         sweep progresses.
-      </p>
-      <p v-if="rerankRequested" class="warning">
-        Reranking could not be requested; it is not implemented in this stack
-        (RB-25).
       </p>
     </template>
   </section>

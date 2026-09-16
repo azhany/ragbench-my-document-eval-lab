@@ -37,6 +37,7 @@ const (
 	ErrCodeRevisionUnavailable   = "revision_unavailable"
 	ErrCodeRetrievalEmpty        = "retrieval_empty"
 	ErrCodeRetrievalFailed       = "retrieval_failed"
+	ErrCodeRerankFailed          = "rerank_failed"
 	ErrCodeCitationMissing       = "citation_missing"
 	ErrCodeCitationInvalid       = "citation_invalid"
 	ErrCodePersistenceFailed     = "persistence_failed"

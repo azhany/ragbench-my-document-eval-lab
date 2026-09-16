@@ -109,6 +109,7 @@ creates a new configuration identity under a new name (migration
 - retrieval_mode: `vector` | `hybrid`
 - top_k: 1–100
 - rerank_enabled
+- reranker_profile (`lexical-v1` when enabled), rerank_candidate_limit 1–100
 - prompt_version: registry-governed (`backend/internal/providers`, currently `v1`)
 - model_profile: registry-governed (`openai-gpt-4o-mini`,
   `opencode-go-glm-5.3-flash`, testing-only `opencode-zen-big-pickle`, or
@@ -137,6 +138,9 @@ creates a new configuration identity under a new name (migration
   relevance unit is the document identity; chunk UUIDs are never treated as
   ground truth for another index revision, so cross-chunk-size comparisons
   stay valid without remapping
+- `judgment_version` plus `graded_judgments` JSONB `{document_id: grade}`;
+  `ndcg-v1` uses gain `2^grade-1` and `log2(rank+1)` discount. Missing
+  judgments contribute zero gain; an empty/zero ideal list is not evaluable.
 - notes, created_at
 
 ### eval_runs (implemented, `0010`)
@@ -146,7 +150,8 @@ creates a new configuration identity under a new name (migration
 - corpus_revisions JSONB (pinned snapshot of per-document active ready
   revisions under the config's embedding identity; null revision entries
   make a missing corpus diagnosable, never silently "ready")
-- evaluator_policy JSONB (policy version, rubric version, scoring K)
+- evaluator_policy JSONB (policy version, rubric version, scoring K and
+  `ndcg_policy_version`)
 - status created|running|completed|partial|failed|dispatch_failed
   (dispatch failure is a visible failure, never success)
 - dag_run_id UNIQUE, dispatch_attempts, dispatch_error
@@ -160,7 +165,7 @@ creates a new configuration identity under a new name (migration
 - trace_id (public rag_traces.trace_id; every generated answer is traceable,
   including classified failures)
 - query_error_code/message
-- recall_k, mrr (document-level, NULL = not evaluable, never zero)
+- recall_k, mrr, ndcg_k (document-level, NULL = not evaluable, never zero)
 - answer_relevance/rationale, groundedness/rationale (versioned rubric
   judge; judge failure is evaluator_failed, not a zero score)
 - citation_correct
@@ -177,8 +182,8 @@ creates a new configuration identity under a new name (migration
 ### experiments / experiment_combinations (`0012`, RB-18)
 - experiments: name UNIQUE, description, dataset_id+dataset_version,
   rubric_version, scoring_k, requested_matrix JSONB (chunk sizes/overlaps,
-  top-k, retrieval mode, prompt version, model profile; rerank reserved to
-  RB-25), combination_limit 1–64 (explicit expansion cap), status
+  top-k, retrieval mode, prompt version, model profile and rerank settings),
+  combination_limit 1–64 (explicit expansion cap), status
   created|running|completed|partial|failed|dispatch_failed
 - experiment_combinations: deterministic settings JSONB (persisted before
   execution), rag_config_id (created immutably per combination; retried
@@ -195,7 +200,7 @@ the API never returns a successful answer if this transaction fails.
 
 - `id` UUID PK; internal foreign-key target for spans
 - `trace_id` unique public trace identifier
-- `request_type`: currently `chat`
+- `request_type`: `chat` or `evaluation`
 - `question`: normalized question text
 - `rag_config_id` FK → `rag_configs`; the configuration is immutable, so this
   is the exact effective configuration identity without copying credentials
@@ -223,8 +228,8 @@ inspectable. No API trace field contains API keys.
 ### rag_spans
 Child rows are inserted atomically with `rag_traces`; only stages actually
 executed are present. Current `span_name` values are `request`,
-`query_embedding`, `retrieval`, `prompt_build`, `llm_generation`, and
-`citation_mapping`. Each row has:
+`query_embedding`, `retrieval`, optional `rerank`, `prompt_build`,
+`llm_generation`, and `citation_mapping`. Each row has:
 
 - `id` UUID PK
 - `trace_id` FK → `rag_traces(id)` `ON DELETE CASCADE`
@@ -234,5 +239,15 @@ executed are present. Current `span_name` values are `request`,
 - `metadata` JSONB with stage identity, counts, provider-reported usage, and
   classified diagnostic details where safe
 
-Reranking is not yet an executable Sprint 3 capability; a configuration that
-requests it is rejected rather than silently omitting a rerank span.
+RB-25's `lexical-v1` reranker records candidate limit and final order in this
+span; failures are persisted as `rerank_failed` rather than silently omitting
+the call.
+
+### eval_comparisons (`0017`)
+- candidate/baseline run IDs, persisted policy name/version, complete verdict
+  JSONB and created timestamp; unique per run pair and policy
+
+### scheduled_regression_checks (`0018`)
+- pinned dataset/version, candidate config, baseline run and policy identity
+- opt-in `enabled`, latest run/status/reason/verdict; missing or incomplete
+  baselines are explicitly `not_evaluable`

@@ -35,6 +35,7 @@ const (
 	SpanRequest         = "request"
 	SpanQueryEmbedding  = "query_embedding"
 	SpanRetrieval       = "retrieval"
+	SpanRerank          = "rerank"
 	SpanPromptBuild     = "prompt_build"
 	SpanLLMGeneration   = "llm_generation"
 	SpanCitationMapping = "citation_mapping"
@@ -84,6 +85,7 @@ type Pipeline struct {
 	Retriever EvidenceSource
 	Embedder  providers.Embedder
 	Generator providers.Generator
+	Reranker  providers.Reranker
 	Traces    TraceStore
 	// Now stubs the clock in tests; nil means time.Now.
 	Now func() time.Time
@@ -182,6 +184,9 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 	if blocker := cfg.ExecutionBlocker(); blocker != nil {
 		return ChatResponse{}, newError(ErrCodeCapabilityUnavailable, "%v", blocker)
 	}
+	if cfg.RerankEnabled && p.Reranker == nil {
+		return ChatResponse{}, newError(ErrCodeCapabilityUnavailable, "reranker integration is not configured")
+	}
 
 	now := p.Now
 	if now == nil {
@@ -245,9 +250,13 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 
 	// Retrieval stage.
 	retrievalStart := now()
-	evidence, retrievalMS, retrievalErr := p.Retriever.Retrieve(ctx, cfg, req.Question, vector)
+	retrievalCfg := cfg
+	if cfg.RerankEnabled && cfg.RerankCandidateLimit > retrievalCfg.TopK {
+		retrievalCfg.TopK = cfg.RerankCandidateLimit
+	}
+	evidence, retrievalMS, retrievalErr := p.Retriever.Retrieve(ctx, retrievalCfg, req.Question, vector)
 	retrievalSpan := SpanRecord{Name: SpanRetrieval,
-		StartedAt: retrievalStart, DurationMS: retrievalMS, Metadata: map[string]any{"top_k": cfg.TopK, "returned": len(evidence)}}
+		StartedAt: retrievalStart, DurationMS: retrievalMS, Metadata: map[string]any{"top_k": retrievalCfg.TopK, "final_top_k": cfg.TopK, "returned": len(evidence)}}
 	if cfg.RetrievalMode == ragconfig.RetrievalModeHybrid {
 		retrievalSpan.Metadata["retrieval_mode"] = "hybrid"
 		retrievalSpan.Metadata["fusion_method"] = cfg.FusionMethod
@@ -259,6 +268,76 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 		return fail(retrievalErr, embedSpan, retrievalSpan)
 	}
 
+	var rerankSpan *SpanRecord
+	if cfg.RerankEnabled {
+		rerankStart := now()
+		profile, profileErr := providers.RerankProfileByName(cfg.RerankerProfile)
+		if profileErr != nil {
+			span := SpanRecord{Name: SpanRerank, StartedAt: rerankStart,
+				DurationMS: now().Sub(rerankStart).Milliseconds(),
+				Metadata:   map[string]any{"profile": cfg.RerankerProfile, "candidate_limit": cfg.RerankCandidateLimit}}
+			return fail(newError(ErrCodeRerankFailed, "%v", profileErr), embedSpan, retrievalSpan, span)
+		}
+		if p.Reranker == nil {
+			span := SpanRecord{Name: SpanRerank, StartedAt: rerankStart,
+				DurationMS: now().Sub(rerankStart).Milliseconds(),
+				Metadata:   map[string]any{"profile": profile.Name, "candidate_limit": cfg.RerankCandidateLimit}}
+			// A binary built without the optional integration still rejects the
+			// request explicitly; it never falls back to the un-reranked list.
+			return fail(newError(ErrCodeCapabilityUnavailable, "reranker provider %q is not configured", profile.Provider), embedSpan, retrievalSpan, span)
+		}
+		candidates := make([]providers.RerankCandidate, len(evidence))
+		for i, e := range evidence {
+			candidates[i] = providers.RerankCandidate{ChunkID: e.ChunkID, DocumentID: e.DocumentID,
+				RevisionID: e.RevisionID, ChunkIndex: e.ChunkIndex, Content: e.Content,
+				Distance: e.Distance, Rank: e.Rank, VectorRank: e.VectorRank,
+				FTSRank: e.FTSRank, Score: e.Score}
+		}
+		result, rerankErr := p.Reranker.Rerank(ctx, profile, req.Question, candidates)
+		span := SpanRecord{Name: SpanRerank, StartedAt: rerankStart,
+			DurationMS: now().Sub(rerankStart).Milliseconds(),
+			Metadata: map[string]any{"profile": profile.Name, "provider": profile.Provider,
+				"candidate_limit": cfg.RerankCandidateLimit, "candidates": len(candidates)}}
+		if rerankErr != nil {
+			span.Metadata["error_code"] = ErrCodeRerankFailed
+			return fail(newError(ErrCodeRerankFailed, "%v", rerankErr), embedSpan, retrievalSpan, span)
+		}
+		if len(result.Candidates) != len(candidates) {
+			return fail(newError(ErrCodeRerankFailed, "reranker returned %d candidates for %d inputs", len(result.Candidates), len(candidates)), embedSpan, retrievalSpan, span)
+		}
+		seen := map[string]bool{}
+		known := make(map[string]bool, len(candidates))
+		for _, candidate := range candidates {
+			known[candidate.ChunkID] = true
+		}
+		ranked := make([]Evidence, 0, len(result.Candidates))
+		finalOrder := make([]string, 0, len(result.Candidates))
+		for i, c := range result.Candidates {
+			if seen[c.ChunkID] || c.ChunkID == "" || !known[c.ChunkID] {
+				return fail(newError(ErrCodeRerankFailed, "reranker returned duplicate or empty chunk identity"), embedSpan, retrievalSpan, span)
+			}
+			seen[c.ChunkID] = true
+			ranked = append(ranked, Evidence{ChunkID: c.ChunkID, DocumentID: c.DocumentID,
+				RevisionID: c.RevisionID, ChunkIndex: c.ChunkIndex, Content: c.Content,
+				Distance: c.Distance, Rank: i + 1, VectorRank: c.VectorRank,
+				FTSRank: c.FTSRank, Score: c.Score})
+			finalOrder = append(finalOrder, c.ChunkID)
+		}
+		if len(ranked) > cfg.TopK {
+			ranked = ranked[:cfg.TopK]
+			finalOrder = finalOrder[:cfg.TopK]
+		}
+		evidence = ranked
+		span.Metadata["final_order"] = finalOrder
+		if result.InputTokens != nil {
+			span.Metadata["input_tokens"] = *result.InputTokens
+		}
+		if result.OutputTokens != nil {
+			span.Metadata["output_tokens"] = *result.OutputTokens
+		}
+		rerankSpan = &span
+	}
+
 	// Prompt build stage with context budgeting.
 	promptStart := now()
 	selected := SelectContext(evidence, ContextBudgetChars)
@@ -268,7 +347,7 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 		DurationMS: now().Sub(promptStart).Milliseconds(), Metadata: map[string]any{
 			"prompt_version": cfg.PromptVersion, "context_chunks": len(selected)}}
 	if promptErr != nil {
-		return fail(promptErr, embedSpan, retrievalSpan, promptSpan)
+		return fail(promptErr, stageSpans(rerankSpan, embedSpan, retrievalSpan, promptSpan)...)
 	}
 	promptSnapshotJSON, _ = json.Marshal(snapshotPrompt(cfg, promptText, selected))
 
@@ -277,7 +356,7 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 	generationProfile = genProfile
 	if genProfileErr != nil {
 		return fail(newError(ErrCodeCapabilityUnavailable, "%v", genProfileErr),
-			embedSpan, retrievalSpan, promptSpan)
+			stageSpans(rerankSpan, embedSpan, retrievalSpan, promptSpan)...)
 	}
 	genStart := now()
 	genCtx, cancelGen := context.WithTimeout(ctx, GenerationTimeout)
@@ -298,7 +377,7 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 		genSpan.Metadata["response_model"] = genRes.Model
 	}
 	if genErr != nil {
-		return fail(wrapProviderError(genErr), embedSpan, retrievalSpan, promptSpan, genSpan)
+		return fail(wrapProviderError(genErr), stageSpans(rerankSpan, embedSpan, retrievalSpan, promptSpan, genSpan)...)
 	}
 	if genRes.InputTokens != nil {
 		genSpan.Metadata["input_tokens"] = *genRes.InputTokens
@@ -318,7 +397,7 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 		// The raw output stays diagnosable in the span without being
 		// returned as an answer: it carries invalid or missing citations.
 		citeSpan.Metadata["raw_answer"] = genRes.Text
-		return fail(citeErr, embedSpan, retrievalSpan, promptSpan, genSpan, citeSpan)
+		return fail(citeErr, stageSpans(rerankSpan, embedSpan, retrievalSpan, promptSpan, genSpan, citeSpan)...)
 	}
 
 	// Cost from explicit rates; unavailable stays null, never zero.
@@ -359,8 +438,8 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 	total := now().Sub(startedAt).Milliseconds()
 	answerText := genRes.Text
 	citationsJSON, _ := json.Marshal(citations)
-	spans := []SpanRecord{embedSpan, retrievalSpan, promptSpan, genSpan, citeSpan,
-		{Name: SpanRequest, StartedAt: startedAt, DurationMS: total}}
+	spans := stageSpans(rerankSpan, embedSpan, retrievalSpan, promptSpan, genSpan, citeSpan,
+		SpanRecord{Name: SpanRequest, StartedAt: startedAt, DurationMS: total})
 	if perr := p.persistTrace(ctx, TraceRecord{
 		TraceID: traceID, RequestType: requestType,
 		Question: req.Question, ConfigID: cfg.ID,
@@ -382,6 +461,20 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 		return ChatResponse{}, perr
 	}
 	return resp, nil
+}
+
+// stageSpans inserts the optional rerank stage after retrieval. Keeping this
+// in one place makes successful and classified-failure traces agree on the
+// actual stage order.
+func stageSpans(rerank *SpanRecord, spans ...SpanRecord) []SpanRecord {
+	if rerank == nil || len(spans) < 2 {
+		return spans
+	}
+	out := make([]SpanRecord, 0, len(spans)+1)
+	out = append(out, spans[:2]...)
+	out = append(out, *rerank)
+	out = append(out, spans[2:]...)
+	return out
 }
 
 // persistTrace wraps TraceStore.Insert so a store failure becomes the

@@ -86,6 +86,10 @@ var generationProfiles = map[string]GenerationProfile{
 	},
 }
 
+var rerankProfiles = map[string]RerankProfile{
+	"lexical-v1": {Name: "lexical-v1", Provider: "local", Model: "token-overlap"},
+}
+
 var prompts = map[string]Prompt{
 	"v1": {Version: "v1", Identifier: "grounded-answer", Template: groundedAnswerV1},
 }
@@ -106,6 +110,16 @@ func GenerationProfileByName(name string) (GenerationProfile, error) {
 	profile, ok := generationProfiles[name]
 	if !ok {
 		return GenerationProfile{}, fmt.Errorf("unknown model profile %q", name)
+	}
+	return profile, nil
+}
+
+// RerankProfileByName resolves a supported reranker identity. Unknown
+// profiles are rejected before a configuration is persisted.
+func RerankProfileByName(name string) (RerankProfile, error) {
+	profile, ok := rerankProfiles[name]
+	if !ok {
+		return RerankProfile{}, fmt.Errorf("unknown reranker profile %q", name)
 	}
 	return profile, nil
 }

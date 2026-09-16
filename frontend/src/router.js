@@ -1,10 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import OverviewView from './views/OverviewView.vue'
-import ComingSoonView from './views/ComingSoonView.vue'
 import LibraryView from './views/LibraryView.vue'
 import ChatView from './views/ChatView.vue'
 import EvaluationsView from './views/EvaluationsView.vue'
 import ExperimentsView from './views/ExperimentsView.vue'
+import MonitorView from './views/MonitorView.vue'
 // Destinations whose owning stories have not landed yet route to
 // ComingSoonView, which states the owning stories explicitly and renders no
 // sample data or fake metrics.
@@ -42,7 +42,7 @@ const routes = [
   {
     path: '/monitor',
     name: 'monitor',
-    component: ComingSoonView,
+    component: MonitorView,
     meta: { title: 'Monitor', story: 'RB-21–RB-24 (Sprint 6)' },
   },
 ]

@@ -40,6 +40,11 @@ x-airflow-common: &airflow-common
     MAX_EXTRACTED_CHARS: ${MAX_EXTRACTED_CHARS:-2000000}
     MAX_DOCX_EXPANDED_BYTES: ${MAX_DOCX_EXPANDED_BYTES:-104857600}
     EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-16}
+    # RB-23 is deliberately opt-in; leaving this false creates no provider
+    # traffic from the scheduled regression DAG.
+    RAGBENCH_SCHEDULE_ENABLED: ${RAGBENCH_SCHEDULE_ENABLED:-false}
+    RAGBENCH_SCHEDULE_CRON: ${RAGBENCH_SCHEDULE_CRON:-}
+    RAGBENCH_SCHEDULE_CHECK_ID: ${RAGBENCH_SCHEDULE_CHECK_ID:-}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - airflow_logs:/opt/airflow/logs

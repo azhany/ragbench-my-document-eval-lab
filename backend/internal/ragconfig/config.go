@@ -41,11 +41,14 @@ var validRetrievalModes = map[string]bool{
 // db/migrations/0014_hybrid_fusion_config.sql. Declared so no fusion
 // constant is a hidden magic number; keep the two in sync.
 const (
-	DefaultRRFConstant    = 60
-	MinRRFConstant        = 1
-	MaxRRFConstant        = 1000
-	DefaultCandidateLimit = 20
-	FusionMethodRRF       = "rrf"
+	DefaultRRFConstant      = 60
+	MinRRFConstant          = 1
+	MaxRRFConstant          = 1000
+	DefaultCandidateLimit   = 20
+	FusionMethodRRF         = "rrf"
+	DefaultRerankerProfile  = "lexical-v1"
+	MinRerankCandidateLimit = 1
+	MaxRerankCandidateLimit = 100
 )
 
 // Config is one immutable saved configuration identity.
@@ -57,6 +60,8 @@ type Config struct {
 	RetrievalMode        string    `json:"retrieval_mode"`
 	TopK                 int       `json:"top_k"`
 	RerankEnabled        bool      `json:"rerank_enabled"`
+	RerankerProfile      string    `json:"reranker_profile"`
+	RerankCandidateLimit int       `json:"rerank_candidate_limit"`
 	FusionMethod         string    `json:"fusion_method"`
 	RRFConstant          float64   `json:"rrf_rank_constant"`
 	FTSCandidateLimit    int       `json:"fts_candidate_limit"`
@@ -68,23 +73,26 @@ type Config struct {
 	EmbeddingModel       string    `json:"embedding_model"`
 	EmbeddingDimensions  int       `json:"embedding_dimensions"`
 	CreatedAt            time.Time `json:"created_at"`
-	// UnavailableCapabilities lists requested features the stack cannot
-	// execute yet; execution paths must reject them explicitly instead of
-	// silently degrading.
+	// UnavailableCapabilities lists requested features the running binary
+	// cannot execute; execution paths must reject them explicitly instead of
+	// silently degrading. The shipped vector, hybrid, and lexical-v1 rerank
+	// modes therefore serialize as an empty list.
 	UnavailableCapabilities []string `json:"unavailable_capabilities"`
 }
 
 // CreateRequest is the API payload for saving a new configuration.
 type CreateRequest struct {
-	Name             string `json:"name"`
-	ChunkSize        int    `json:"chunk_size"`
-	ChunkOverlap     int    `json:"chunk_overlap"`
-	RetrievalMode    string `json:"retrieval_mode"`
-	TopK             int    `json:"top_k"`
-	RerankEnabled    bool   `json:"rerank_enabled"`
-	PromptVersion    string `json:"prompt_version"`
-	ModelProfile     string `json:"model_profile"`
-	EmbeddingProfile string `json:"embedding_profile"`
+	Name                 string `json:"name"`
+	ChunkSize            int    `json:"chunk_size"`
+	ChunkOverlap         int    `json:"chunk_overlap"`
+	RetrievalMode        string `json:"retrieval_mode"`
+	TopK                 int    `json:"top_k"`
+	RerankEnabled        bool   `json:"rerank_enabled"`
+	RerankerProfile      string `json:"reranker_profile"`
+	RerankCandidateLimit int    `json:"rerank_candidate_limit"`
+	PromptVersion        string `json:"prompt_version"`
+	ModelProfile         string `json:"model_profile"`
+	EmbeddingProfile     string `json:"embedding_profile"`
 }
 
 // FieldError is one field-level validation violation.
@@ -115,8 +123,8 @@ var (
 )
 
 // CapabilityUnavailableError reports a configuration that requests a
-// capability the stack cannot execute yet. Execution paths must return this
-// instead of silently degrading (hybrid → vector, rerank → no-rerank).
+// capability the stack cannot execute. Execution paths must return this
+// instead of silently degrading.
 type CapabilityUnavailableError struct {
 	Capability string
 }
@@ -130,18 +138,20 @@ func (e *CapabilityUnavailableError) Error() string {
 // Resolved is a validated creation request with the embedding identity
 // resolved from the registry.
 type Resolved struct {
-	Name                string
-	ChunkSize           int
-	ChunkOverlap        int
-	RetrievalMode       string
-	TopK                int
-	RerankEnabled       bool
-	PromptVersion       string
-	ModelProfile        string
-	EmbeddingProfile    string
-	EmbeddingProvider   string
-	EmbeddingModel      string
-	EmbeddingDimensions int
+	Name                 string
+	ChunkSize            int
+	ChunkOverlap         int
+	RetrievalMode        string
+	TopK                 int
+	RerankEnabled        bool
+	RerankerProfile      string
+	RerankCandidateLimit int
+	PromptVersion        string
+	ModelProfile         string
+	EmbeddingProfile     string
+	EmbeddingProvider    string
+	EmbeddingModel       string
+	EmbeddingDimensions  int
 }
 
 // Resolve validates the request against explicit bounds and the provider
@@ -176,6 +186,21 @@ func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
 			Message: fmt.Sprintf("top_k must be between %d and %d", MinTopK, MaxTopK)})
 	}
 
+	rerankerProfile := strings.TrimSpace(req.RerankerProfile)
+	if rerankerProfile == "" {
+		rerankerProfile = DefaultRerankerProfile
+	}
+	if req.RerankCandidateLimit == 0 {
+		req.RerankCandidateLimit = DefaultCandidateLimit
+	}
+	if req.RerankCandidateLimit < MinRerankCandidateLimit || req.RerankCandidateLimit > MaxRerankCandidateLimit {
+		errs = append(errs, FieldError{Field: "rerank_candidate_limit",
+			Message: fmt.Sprintf("rerank_candidate_limit must be between %d and %d", MinRerankCandidateLimit, MaxRerankCandidateLimit)})
+	}
+	if _, err := providers.RerankProfileByName(rerankerProfile); err != nil {
+		errs = append(errs, FieldError{Field: "reranker_profile", Message: err.Error()})
+	}
+
 	if !validRetrievalModes[req.RetrievalMode] {
 		errs = append(errs, FieldError{Field: "retrieval_mode",
 			Message: fmt.Sprintf("retrieval_mode must be %q or %q", RetrievalModeVector, RetrievalModeHybrid)})
@@ -197,40 +222,35 @@ func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
 
 	embedding, _ := providers.EmbeddingProfileByName(strings.TrimSpace(req.EmbeddingProfile))
 	return Resolved{
-		Name:                name,
-		ChunkSize:           req.ChunkSize,
-		ChunkOverlap:        req.ChunkOverlap,
-		RetrievalMode:       req.RetrievalMode,
-		TopK:                req.TopK,
-		RerankEnabled:       req.RerankEnabled,
-		PromptVersion:       strings.TrimSpace(req.PromptVersion),
-		ModelProfile:        strings.TrimSpace(req.ModelProfile),
-		EmbeddingProfile:    embedding.Name,
-		EmbeddingProvider:   embedding.Provider,
-		EmbeddingModel:      embedding.Model,
-		EmbeddingDimensions: embedding.Dimensions,
+		Name:                 name,
+		ChunkSize:            req.ChunkSize,
+		ChunkOverlap:         req.ChunkOverlap,
+		RetrievalMode:        req.RetrievalMode,
+		TopK:                 req.TopK,
+		RerankEnabled:        req.RerankEnabled,
+		RerankerProfile:      rerankerProfile,
+		RerankCandidateLimit: req.RerankCandidateLimit,
+		PromptVersion:        strings.TrimSpace(req.PromptVersion),
+		ModelProfile:         strings.TrimSpace(req.ModelProfile),
+		EmbeddingProfile:     embedding.Name,
+		EmbeddingProvider:    embedding.Provider,
+		EmbeddingModel:       embedding.Model,
+		EmbeddingDimensions:  embedding.Dimensions,
 	}, nil
 }
 
 // unavailableCapabilitiesFor lists capabilities requested by these settings
-// that the stack cannot execute yet. Hybrid retrieval has executed since
-// RB-17 (deterministic RRF fusion); reranking waits for RB-25.
+// that the current binary cannot execute. Hybrid retrieval and lexical-v1
+// reranking are executable; an unknown reranker is rejected during creation.
 func unavailableCapabilitiesFor(mode string, rerank bool) []string {
 	// Non-nil so the JSON field serializes as [] rather than null.
-	caps := []string{}
-	if rerank {
-		caps = append(caps, "rerank")
-	}
-	return caps
+	return []string{}
 }
 
 // ExecutionBlocker returns a non-nil error when executing a query with this
-// configuration would require a capability the stack does not have yet.
+// configuration would require a capability the running binary does not have.
 // Query and evaluation pipelines must call this and reject the request with
 // a capability_unavailable error instead of degrading silently.
 func (c Config) ExecutionBlocker() error {
-	if c.RerankEnabled {
-		return &CapabilityUnavailableError{Capability: "rerank"}
-	}
 	return nil
 }

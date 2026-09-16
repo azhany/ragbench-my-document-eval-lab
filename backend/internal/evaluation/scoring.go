@@ -9,7 +9,10 @@
 // treated as ground truth for a different index revision.
 package evaluation
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // RetrievedEvidence is one retrieved chunk reduced to its relevance-unit
 // identity: document and 1-based rank.
@@ -92,3 +95,46 @@ func MRR(expected []string, retrieved []RetrievedEvidence) (float64, bool) {
 	sort.Ints(hits)
 	return 1 / float64(hits[0]), true
 }
+
+// NDCGPolicyVersion identifies the persisted graded-judgment semantics.
+const NDCGPolicyVersion = "ndcg-v1"
+
+// NDCGAtK computes graded nDCG using gain 2^grade-1 and log2(rank+1)
+// discount. Grades are keyed by the stable document relevance unit. Unknown
+// retrieved documents have gain zero; an empty judgment set or an ideal list
+// with zero gain is not evaluable, never a manufactured zero.
+func NDCGAtK(judgments map[string]int, retrieved []RetrievedEvidence, k int) (float64, bool) {
+	if len(judgments) == 0 || k <= 0 {
+		return 0, false
+	}
+	grades := make([]int, 0, len(judgments))
+	for _, grade := range judgments {
+		if grade < 0 {
+			return 0, false
+		}
+		grades = append(grades, grade)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(grades)))
+	ideal := 0.0
+	for rank, grade := range grades {
+		if rank >= k {
+			break
+		}
+		ideal += gain(grade) / math.Log2(float64(rank+2))
+	}
+	if ideal == 0 {
+		return 0, false
+	}
+	actual := 0.0
+	seen := map[string]bool{}
+	for _, evidence := range retrieved {
+		if evidence.Rank > k || seen[evidence.DocumentID] {
+			continue
+		}
+		seen[evidence.DocumentID] = true
+		actual += gain(judgments[evidence.DocumentID]) / math.Log2(float64(evidence.Rank+1))
+	}
+	return actual / ideal, true
+}
+
+func gain(grade int) float64 { return math.Pow(2, float64(grade)) - 1 }

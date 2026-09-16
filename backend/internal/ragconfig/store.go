@@ -25,7 +25,7 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const configColumns = `id, name, chunk_size, chunk_overlap, retrieval_mode, top_k,
 	rerank_enabled, fusion_method, rrf_rank_constant, fts_candidate_limit,
-	vector_candidate_limit,
+	vector_candidate_limit, reranker_profile, rerank_candidate_limit,
 	prompt_version, model_profile, embedding_profile,
 	embedding_provider, embedding_model, embedding_dimensions, created_at`
 
@@ -39,29 +39,33 @@ func (s *Store) Create(ctx context.Context, req CreateRequest) (Config, error) {
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO rag_configs (
 			name, chunk_size, chunk_overlap, retrieval_mode, top_k, rerank_enabled,
+			reranker_profile, rerank_candidate_limit,
 			prompt_version, model_profile, embedding_profile,
 			embedding_provider, embedding_model, embedding_dimensions
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id, created_at`,
 		resolved.Name, resolved.ChunkSize, resolved.ChunkOverlap, resolved.RetrievalMode,
-		resolved.TopK, resolved.RerankEnabled, resolved.PromptVersion, resolved.ModelProfile,
+		resolved.TopK, resolved.RerankEnabled, resolved.RerankerProfile, resolved.RerankCandidateLimit,
+		resolved.PromptVersion, resolved.ModelProfile,
 		resolved.EmbeddingProfile, resolved.EmbeddingProvider, resolved.EmbeddingModel,
 		resolved.EmbeddingDimensions,
 	)
 
 	cfg := Config{
-		Name:                resolved.Name,
-		ChunkSize:           resolved.ChunkSize,
-		ChunkOverlap:        resolved.ChunkOverlap,
-		RetrievalMode:       resolved.RetrievalMode,
-		TopK:                resolved.TopK,
-		RerankEnabled:       resolved.RerankEnabled,
-		PromptVersion:       resolved.PromptVersion,
-		ModelProfile:        resolved.ModelProfile,
-		EmbeddingProfile:    resolved.EmbeddingProfile,
-		EmbeddingProvider:   resolved.EmbeddingProvider,
-		EmbeddingModel:      resolved.EmbeddingModel,
-		EmbeddingDimensions: resolved.EmbeddingDimensions,
+		Name:                 resolved.Name,
+		ChunkSize:            resolved.ChunkSize,
+		ChunkOverlap:         resolved.ChunkOverlap,
+		RetrievalMode:        resolved.RetrievalMode,
+		TopK:                 resolved.TopK,
+		RerankEnabled:        resolved.RerankEnabled,
+		RerankerProfile:      resolved.RerankerProfile,
+		RerankCandidateLimit: resolved.RerankCandidateLimit,
+		PromptVersion:        resolved.PromptVersion,
+		ModelProfile:         resolved.ModelProfile,
+		EmbeddingProfile:     resolved.EmbeddingProfile,
+		EmbeddingProvider:    resolved.EmbeddingProvider,
+		EmbeddingModel:       resolved.EmbeddingModel,
+		EmbeddingDimensions:  resolved.EmbeddingDimensions,
 	}
 	if err := row.Scan(&cfg.ID, &cfg.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
@@ -141,6 +145,7 @@ func scanConfig(row scanner) (Config, error) {
 		&cfg.ID, &cfg.Name, &cfg.ChunkSize, &cfg.ChunkOverlap, &cfg.RetrievalMode,
 		&cfg.TopK, &cfg.RerankEnabled, &cfg.FusionMethod, &cfg.RRFConstant,
 		&cfg.FTSCandidateLimit, &cfg.VectorCandidateLimit,
+		&cfg.RerankerProfile, &cfg.RerankCandidateLimit,
 		&cfg.PromptVersion, &cfg.ModelProfile,
 		&cfg.EmbeddingProfile, &cfg.EmbeddingProvider, &cfg.EmbeddingModel,
 		&cfg.EmbeddingDimensions, &cfg.CreatedAt,
@@ -158,6 +163,12 @@ func scanConfig(row scanner) (Config, error) {
 	}
 	if cfg.VectorCandidateLimit == 0 {
 		cfg.VectorCandidateLimit = DefaultCandidateLimit
+	}
+	if cfg.RerankerProfile == "" {
+		cfg.RerankerProfile = DefaultRerankerProfile
+	}
+	if cfg.RerankCandidateLimit == 0 {
+		cfg.RerankCandidateLimit = DefaultCandidateLimit
 	}
 	cfg.UnavailableCapabilities = unavailableCapabilitiesFor(cfg.RetrievalMode, cfg.RerankEnabled)
 	return cfg, nil

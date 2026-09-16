@@ -64,7 +64,7 @@ Current check set:
 
 ### `GET /`
 
-Service information: `{"service":"ragbench-api","status":"ok"}` plus the implemented resource roots `["/healthz","/readyz","/api/v1/rag-configs","/api/v1/documents","/api/v1/chat","/api/v1/traces"]`.
+Service information: `{"service":"ragbench-api","status":"ok"}` plus the implemented resource roots, including `/api/v1/metrics/summary` and `/api/v1/regression-checks`.
 
 ## RAG configurations (implemented)
 
@@ -90,6 +90,8 @@ Creates one configuration. Request body (all fields required except
   "retrieval_mode": "vector",
   "top_k": 5,
   "rerank_enabled": false,
+  "reranker_profile": "lexical-v1",
+  "rerank_candidate_limit": 20,
   "prompt_version": "v1",
   "model_profile": "openai-gpt-4o-mini",
   "embedding_profile": "openai-text-embedding-3-small"
@@ -139,11 +141,10 @@ Response `201 Created` with `Location: /api/v1/rag-configs/{id}`:
 server-side from the registry and persisted with the profile key, so the exact
 embedding identity used survives registry changes.
 
-`unavailable_capabilities` lists requested features the stack cannot execute
-yet: `"rerank"` until RB-25. Hybrid retrieval is executable through the
-persisted FTS+RRF settings; rerank configurations can be saved, but every
-execution path (chat, evaluation) must reject them with
-`422 capability_unavailable` — never silently degrade to no-rerank.
+`unavailable_capabilities` lists requested features the running stack cannot
+execute. Hybrid retrieval is executable through persisted FTS+RRF settings;
+the shipped `lexical-v1` reranker is executable when `rerank_enabled` is true.
+Reranker failures are classified and persisted; there is no silent fallback.
 
 Errors:
 
@@ -309,8 +310,8 @@ Request bodies are JSON, limited to 64 KiB, and reject unknown fields:
 
 `question` is trimmed and must contain 1–2,000 Unicode characters.
 `config_id` must identify an existing immutable RAG configuration. The
-selected configuration must not request an unavailable capability such as
-hybrid retrieval or reranking.
+selected configuration must not request a capability absent from the running
+stack. Hybrid retrieval and the shipped lexical reranker are executable.
 
 Response `200 OK`:
 
@@ -379,7 +380,7 @@ pre-execution validation/config errors have no trace:
 | 400 | `validation_failed` | question/config field validation failed |
 | 404 | `not_found` | unknown or malformed configuration ID |
 | 409 | `revision_unavailable` | no active ready revision compatible with the saved embedding identity |
-| 422 | `capability_unavailable` | requested hybrid retrieval or reranking is not executable |
+| 422 | `capability_unavailable` | requested capability is not executable in this deployment |
 | 422 | `retrieval_empty` | a compatible retrieval boundary exists but returned no evidence |
 | 502 | `retrieval_failed` | pgvector retrieval or retrieval-boundary query failed |
 | 502 | `embedding_failed` | query embedding provider failure or invalid vector response |
@@ -435,6 +436,8 @@ Import a dataset: immutable version 1 with reviewed cases.
       "question": "…",
       "reference_answer": "…",
       "expected_evidence": [{"document_id": "<uuid>", "label": "<source name>"}],
+      "judgment_version": "binary-v1",
+      "graded_judgments": {},
       "notes": ""
     }
   ]
@@ -446,7 +449,9 @@ Import a dataset: immutable version 1 with reviewed cases.
 - `409 name_conflict` — the dataset name is unique.
 - `422 invalid_dataset` / `422 invalid_reference` — empty versions, invalid
   references (unknown/deleted/malformed document ids) are rejected, never
-  stored; duplicate case_key is `400 duplicate_case_key`.
+  stored; duplicate case_key is `400 duplicate_case_key`. For graded
+  retrieval, `graded_judgments` maps expected document UUIDs to integer grades
+  `0`–`5` and pins `judgment_version` to the stored nDCG semantics.
 
 ### `GET /api/v1/eval-datasets`
 `{"datasets": [...], "fields": same as 201}`.
@@ -478,7 +483,7 @@ configs are `422 invalid_run`.
 ### `GET /api/v1/eval-runs`, `GET /api/v1/eval-runs/{id}`
 List (newest first) / detail. Detail includes the pinned inputs and a
 computed `aggregate` with explicit denominators: `recall_count`,
-`recall_mean`, `mrr_*`, rubric means with counts, `latency_population`,
+`recall_mean`, `mrr_*`, `ndcg_count`, `ndcg_mean`, rubric means with counts, `latency_population`,
 `latency_p50_ms`, `latency_p95_ms`, `cost_population`, `cost_total`,
 `completed`, `query_failed`, `evaluator_failed`, `missing_score_cases`.
 Missing values are null — never zero — and status distinguishes
@@ -486,7 +491,7 @@ completed/partial/failed work.
 
 ### `GET /api/v1/eval-runs/{id}/results`
 Per-case rows: `case_key`, `status` (completed|failed|evaluator_failed),
-`trace_id`, `query_error_code/message`, `recall_k`, `mrr`, rubric scores
+`trace_id`, `query_error_code/message`, `recall_k`, `mrr`, `ndcg_k`, rubric scores
 with verbatim rationales, `citation_correct`, evaluator tokens/cost, latency
 and cost copies. `NULL` scores mean not evaluable, never zero quality.
 
@@ -507,12 +512,15 @@ and `passed|regression|not_evaluable|gain_exception` with reasons. Strictly
 greater-than threshold semantics; zero-baseline relative deltas are
 undefined (`not_evaluable`); incomplete runs are never a clean pass; a
 quality regression stays distinct from a pipeline or evaluator failure.
+When a persisted policy includes `ndcg_k`, its values are compared under the
+same pinned `ndcg_policy_version`; different judgment/scoring policies are
+incompatible rather than silently compared.
 
 ### Experiments (RB-18)
 - `POST /api/v1/experiments` — persisted matrix expansion before execution
   with an explicit `combination_limit` (1–64); every combination resolves as
-  a valid immutable config identity up front; the rerank dimension is
-  rejected (`422 invalid_experiment`) until RB-25 rather than implied.
+  a valid immutable config identity up front; rerank settings use the same
+  persisted config identity and candidate-limit validation.
 - `GET /api/v1/experiments`, `GET /api/v1/experiments/{id}`
 - `POST /api/v1/experiments/{id}/advance` — one idempotent orchestration
   step (the `rag_parameter_sweep` DAG drives it until terminal); chunk/
@@ -524,6 +532,30 @@ quality regression stays distinct from a pipeline or evaluator failure.
 
 `GET /api/v1/metrics/summary`
 
+The summary accepts optional `from`/`to` RFC3339 timestamps, an IANA
+`timezone` (default `UTC`), and `traffic=all|query|evaluation` (default
+`all`). The default window is the previous 30×24 hours. Query traffic means
+`rag_traces.request_type=chat`; evaluation traffic means `evaluation`. Query
+tokens/cost and evaluation judge cost are kept separate. Percentile fields
+state their population; empty populations and unknown usage/pricing are null,
+never manufactured zeroes. Quality trends are grouped by dataset/version,
+evaluator/nDCG policy, day and currency, and failure rows contain a
+`detail_path` to the persisted trace, document or evaluation run.
+
 `GET /api/v1/traces`
 
 `GET /api/v1/traces/{traceId}`
+
+### Scheduled regression checks (RB-23)
+
+`POST /api/v1/regression-checks` persists an opt-in definition containing
+dataset/version, candidate configuration, baseline run, policy name/version
+and `enabled`. `GET /api/v1/regression-checks` and `GET .../{id}` expose the
+last execution state. Airflow calls `POST .../{id}/start`, which creates a
+normal `eval_run` through the existing dispatch workflow, then calls
+`POST .../{id}/finish` with the existing comparison verdict. Missing or
+incomplete baselines are `not_evaluable`, never pass. Local Compose sets
+`RAGBENCH_SCHEDULE_ENABLED=false` and no cron by default; explicitly set
+`RAGBENCH_SCHEDULE_ENABLED=true`, `RAGBENCH_SCHEDULE_CRON`, and
+`RAGBENCH_SCHEDULE_CHECK_ID` only in an authorized environment. Manual DAG
+triggers can provide `dag_run.conf.check_id` instead.

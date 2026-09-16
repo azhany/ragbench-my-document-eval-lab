@@ -138,6 +138,15 @@ func TestResolveRejectsInvalidName(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsUnknownRerankerProfile(t *testing.T) {
+	req := validRequest()
+	req.RerankerProfile = "remote-v9"
+	_, errs := Resolve(req)
+	if len(fieldMessages(errs, "reranker_profile")) == 0 {
+		t.Fatalf("expected reranker profile validation error, got %v", errs)
+	}
+}
+
 func TestResolveReportsAllViolationsAtOnce(t *testing.T) {
 	req := CreateRequest{}
 	_, errs := Resolve(req)
@@ -163,9 +172,9 @@ func TestUnavailableCapabilitiesAndExecutionBlocker(t *testing.T) {
 	}{
 		{"vector no rerank is executable", RetrievalModeVector, false, nil, false},
 		{"hybrid is executable since RB-17", RetrievalModeHybrid, false, nil, false},
-		{"rerank is blocked", RetrievalModeVector, true, []string{"rerank"}, true},
-		{"hybrid plus rerank blocks rerank", RetrievalModeHybrid, true,
-			[]string{"rerank"}, true},
+		{"rerank is executable", RetrievalModeVector, true, nil, false},
+		{"hybrid plus rerank is executable", RetrievalModeHybrid, true,
+			nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -32,6 +32,8 @@ type ResultObservation struct {
 	AnswerRelevance    int
 	HasGroundedness    bool
 	Groundedness       int
+	HasNDCG            bool
+	NDCG               float64
 	HasCost            bool
 	Cost               float64
 }
@@ -54,6 +56,8 @@ type RunAggregate struct {
 	GroundednessMean    *float64 `json:"groundedness_mean"`
 	CitationCount       int      `json:"citation_count"`
 	CitationMean        *float64 `json:"citation_correct_mean"`
+	NDCGCount           int      `json:"ndcg_count"`
+	NDCGMean            *float64 `json:"ndcg_mean"`
 	// Efficiency — over completed queries (see doc comment).
 	LatencyPopulation int      `json:"latency_population"`
 	LatencyP50MS      *int64   `json:"latency_p50_ms"`
@@ -98,7 +102,7 @@ func mean(values []float64) *float64 {
 func Aggregate(observations []ResultObservation) RunAggregate {
 	agg := RunAggregate{TotalCases: len(observations)}
 	var latencies []int64
-	var recalls, mrrs, rel, ground, costs []float64
+	var recalls, mrrs, rel, ground, ndcgs, costs []float64
 
 	for _, o := range observations {
 		switch o.Status {
@@ -131,6 +135,10 @@ func Aggregate(observations []ResultObservation) RunAggregate {
 			agg.GroundednessCount++
 			ground = append(ground, float64(o.Groundedness))
 		}
+		if o.HasNDCG {
+			agg.NDCGCount++
+			ndcgs = append(ndcgs, o.NDCG)
+		}
 		if o.HasCost {
 			agg.CostPopulation++
 			costs = append(costs, o.Cost)
@@ -156,6 +164,7 @@ func Aggregate(observations []ResultObservation) RunAggregate {
 	agg.MRRMean = mean(mrrs)
 	agg.AnswerRelevanceMean = mean(rel)
 	agg.GroundednessMean = mean(ground)
+	agg.NDCGMean = mean(ndcgs)
 	return agg
 }
 
