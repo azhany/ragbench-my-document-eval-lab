@@ -110,8 +110,9 @@ creates a new configuration identity under a new name (migration
 - top_k: 1–100
 - rerank_enabled
 - prompt_version: registry-governed (`backend/internal/providers`, currently `v1`)
-- model_profile: registry-governed (`openai-gpt-4o-mini` or
-  `opencode-go-glm-5.3-flash`)
+- model_profile: registry-governed (`openai-gpt-4o-mini`,
+  `opencode-go-glm-5.3-flash`, testing-only `opencode-zen-big-pickle`, or
+  fallback `opencode-zen-mimo-v2.5-free`, or `huggingface-gemma-3-4b-it-free`)
 - embedding_profile: registry-governed key (`openai-text-embedding-3-small` or
   `huggingface-bge-small-en-v1.5`)
 - embedding_provider, embedding_model, embedding_dimensions: resolved identity

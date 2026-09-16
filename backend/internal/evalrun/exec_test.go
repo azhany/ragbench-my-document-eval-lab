@@ -2,6 +2,7 @@ package evalrun
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -10,6 +11,15 @@ import (
 	"ragbench-my/backend/internal/evaldata"
 	"ragbench-my/backend/internal/ragconfig"
 )
+
+func TestJudgeCallCostUsesPinnedBigPickleRubric(t *testing.T) {
+	input, output := 100, 20
+	run := Run{EvaluatorPolicy: json.RawMessage(`{"rubric_version":"rubric-v1-big-pickle","scoring_k":5}`)}
+	result := judgeCallCost(run, scoreInputs{EvaluatorInputTokens: &input, EvaluatorOutputTokens: &output})
+	if !result.Components.Available || result.Cost == nil || *result.Cost != 0 {
+		t.Fatalf("judge cost = %+v, components = %+v; want available zero", result.Cost, result.Components)
+	}
+}
 
 // The executor runs the shared pipeline (with evaluation attribution) and
 // persists idempotent, separately-scored results.
@@ -88,6 +98,16 @@ func TestExecutePersistsScoredResultsIdempotently(t *testing.T) {
 	after, _ := runs.GetResults(ctx, run.ID)
 	if len(after) != 1 {
 		t.Fatalf("results = %d rows, want exactly the one stored row", len(after))
+	}
+
+	// A successful subset of a larger pinned dataset is incomplete, not a
+	// completed run. Finalization must account for the expected case count.
+	incomplete, err := runs.FinalizeStatus(ctx, run.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incomplete.Status != StatusPartial {
+		t.Fatalf("incomplete run status = %s, want partial", incomplete.Status)
 	}
 
 	// Aggregate run status refreshes to completed.

@@ -114,7 +114,7 @@ func (e *Executor) runPipeline(ctx context.Context, run Run, golden evaldata.Cas
 // retrieval, judge, citation, timing, token, and cost metrics.
 func (e *Executor) persist(ctx context.Context, run Run, golden evaldata.Case, outcome pipelineOutcome, totalCases int) (Result, error) {
 	scores := e.score(ctx, run, golden, outcome)
-	judge := judgeCallCost(scores)
+	judge := judgeCallCost(run, scores)
 
 	var traceID any
 	if outcome.hasTrace {
@@ -218,8 +218,16 @@ type scoreInputs struct {
 // judgeCallCost prices the judge usage from the explicit rate table under
 // the rubric's pinned judge model: evaluator cost stays separate from query
 // cost, and unreported/priced-out usage leaves NULL with its reason.
-func judgeCallCost(s scoreInputs) rag.JudgeCostResult {
-	return rag.EvalJudgeCost(providers.RubricJudgeProvider, providers.RubricJudgeModel,
+func judgeCallCost(run Run, s scoreInputs) rag.JudgeCostResult {
+	var policy evaluation.EvaluatorPolicyVersioned
+	if err := json.Unmarshal(run.EvaluatorPolicy, &policy); err != nil {
+		return rag.EvalJudgeCost("", "", s.EvaluatorInputTokens, s.EvaluatorOutputTokens)
+	}
+	rubric, err := providers.RubricByVersion(policy.RubricVersion)
+	if err != nil {
+		return rag.EvalJudgeCost("", "", s.EvaluatorInputTokens, s.EvaluatorOutputTokens)
+	}
+	return rag.EvalJudgeCost(rubric.JudgeProvider, rubric.JudgeModel,
 		s.EvaluatorInputTokens, s.EvaluatorOutputTokens)
 }
 

@@ -80,6 +80,10 @@ def run_pending_cases(run_id):
             continue
         result = execute_case(run_id, case["id"])
         logger.info("case %s -> %s", case["case_key"], result.get("status"))
+    # The DAG's finalize task consumes the durable run identity/status. Return
+    # a fresh status after the loop so Airflow does not need an XCom side
+    # channel or accidentally pass None into finalize().
+    return run_status(run_id)
 
 
 def attempted_status(run_id, case):

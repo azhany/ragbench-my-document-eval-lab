@@ -21,30 +21,36 @@ type Config struct {
 	AirflowPassword string
 	// Provider endpoints and credentials are resolved at startup. Keys stay in
 	// process memory only; they are never logged or persisted.
-	OpenAIBaseURL               string
-	OpenAIEmbeddingAPIKey       string
-	OpenAIGenerationAPIKey      string
-	OpenAICompatibleBaseURL     string
-	OpenAICompatibleAPIKey      string
-	HuggingFaceEmbeddingBaseURL string
-	HuggingFaceAPIKey           string
+	OpenAIBaseURL                string
+	OpenAIEmbeddingAPIKey        string
+	OpenAIGenerationAPIKey       string
+	OpenAICompatibleBaseURL      string
+	OpenCodeZenBaseURL           string
+	OpenAICompatibleAPIKey       string
+	HuggingFaceEmbeddingBaseURL  string
+	HuggingFaceGenerationBaseURL string
+	HuggingFaceAPIKey            string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:                        envOr("RAGBENCH_API_ADDR", ":8080"),
-		DatabaseURL:                 strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		UploadDir:                   envOr("UPLOAD_DIR", "/data/uploads"),
-		AirflowURL:                  envOr("AIRFLOW_API_URL", "http://airflow-apiserver:8080"),
-		AirflowUsername:             envOr("AIRFLOW_API_USERNAME", "airflow"),
-		AirflowPassword:             envOr("AIRFLOW_API_PASSWORD", "airflow"),
-		OpenAIBaseURL:               envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-		OpenAIEmbeddingAPIKey:       providers.EmbeddingKey(),
-		OpenAIGenerationAPIKey:      providers.GenerationKey(),
-		OpenAICompatibleBaseURL:     envOr("OPENAI_COMPATIBLE_BASE_URL", "https://opencode.ai/zen/go/v1"),
-		OpenAICompatibleAPIKey:      firstEnv("OPENCODE_API_KEY", "GENERATION_PROVIDER_API_KEY", "OPENAI_API_KEY"),
-		HuggingFaceEmbeddingBaseURL: envOr("HUGGINGFACE_EMBEDDING_BASE_URL", "https://router.huggingface.co/hf-inference/models"),
-		HuggingFaceAPIKey:           firstEnv("HF_TOKEN", "HUGGINGFACE_API_KEY", "EMBEDDING_PROVIDER_API_KEY"),
+		Addr:                    envOr("RAGBENCH_API_ADDR", ":8080"),
+		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		UploadDir:               envOr("UPLOAD_DIR", "/data/uploads"),
+		AirflowURL:              envOr("AIRFLOW_API_URL", "http://airflow-apiserver:8080"),
+		AirflowUsername:         envOr("AIRFLOW_API_USERNAME", "airflow"),
+		AirflowPassword:         envOr("AIRFLOW_API_PASSWORD", "airflow"),
+		OpenAIBaseURL:           envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		OpenAIEmbeddingAPIKey:   providers.EmbeddingKey(),
+		OpenAIGenerationAPIKey:  providers.GenerationKey(),
+		OpenAICompatibleBaseURL: envOr("OPENAI_COMPATIBLE_BASE_URL", "https://opencode.ai/zen/go/v1"),
+		// OpenCode Zen's catalog endpoint is separate from the OpenCode Go
+		// endpoint so existing pinned profiles remain unchanged.
+		OpenCodeZenBaseURL:           envOr("OPENCODE_ZEN_BASE_URL", "https://opencode.ai/zen/v1"),
+		OpenAICompatibleAPIKey:       firstEnv("OPENCODE_API_KEY", "GENERATION_PROVIDER_API_KEY", "OPENAI_API_KEY"),
+		HuggingFaceEmbeddingBaseURL:  envOr("HUGGINGFACE_EMBEDDING_BASE_URL", "https://router.huggingface.co/hf-inference/models"),
+		HuggingFaceGenerationBaseURL: envOr("HUGGINGFACE_GENERATION_BASE_URL", "https://router.huggingface.co/v1"),
+		HuggingFaceAPIKey:            firstEnv("HF_TOKEN", "HUGGINGFACE_API_KEY", "EMBEDDING_PROVIDER_API_KEY"),
 	}
 	var err error
 	cfg.MaxUploadBytes, err = strconv.ParseInt(envOr("MAX_UPLOAD_BYTES", "20971520"), 10, 64)

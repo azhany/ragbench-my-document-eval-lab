@@ -324,6 +324,7 @@ func (s *Store) GetResults(ctx context.Context, runID string) ([]Result, error) 
 // ResultStatuses is one case's terminal state summary for finalize.
 type resultStatuses struct {
 	TotalCases      int
+	Attempted       int
 	Completed       int
 	QueryFailed     int
 	EvaluatorFailed int
@@ -352,6 +353,7 @@ func (s *Store) statusCounts(ctx context.Context, runID string, expectedTotal in
 			st.EvaluatorFailed++
 		}
 	}
+	st.Attempted = st.Completed + st.QueryFailed + st.EvaluatorFailed
 	return run, st, nil
 }
 
@@ -375,15 +377,16 @@ func (s *Store) finalizeStatus(ctx context.Context, runID string, expectedTotal 
 		return run, nil // dispatch failure stays visible
 	}
 	switch {
-	case st.Completed+st.QueryFailed+st.EvaluatorFailed == 0:
+	case st.Attempted == 0:
 		status = StatusFailed // nothing executed at all
 	case st.Completed == 0 && st.EvaluatorFailed == 0:
 		status = StatusFailed // every query failed
-	case st.QueryFailed+st.EvaluatorFailed == 0:
+	case st.Attempted == st.TotalCases && st.QueryFailed+st.EvaluatorFailed == 0:
 		status = StatusCompleted
 	default:
-		// Some queries failed or some scoring failed: a partial outcome,
-		// visible as such — evaluator failures are not zero quality.
+		// Some cases are missing, some queries failed, or some scoring failed:
+		// a partial outcome, visible as such — evaluator failures are not zero
+		// quality and an incomplete pair can never be completed.
 		status = StatusPartial
 	}
 	_, err = s.pool.Exec(ctx, `

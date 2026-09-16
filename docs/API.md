@@ -107,7 +107,7 @@ Validation rules (explicit bounds, mirrored by database constraints in
 | `retrieval_mode` | `vector` or `hybrid` |
 | `top_k` | integer 1–100 |
 | `prompt_version` | must exist in the prompt registry (currently `v1`) |
-| `model_profile` | must exist in the model profile registry (`openai-gpt-4o-mini` or `opencode-go-glm-5.3-flash`) |
+| `model_profile` | must exist in the model profile registry (`openai-gpt-4o-mini`, `opencode-go-glm-5.3-flash`, testing-only `opencode-zen-big-pickle`, fallback `opencode-zen-mimo-v2.5-free`, or `huggingface-gemma-3-4b-it-free`) |
 | `embedding_profile` | must exist in the embedding profile registry (`openai-text-embedding-3-small`, 1536d, or `huggingface-bge-small-en-v1.5`, 384d) |
 
 The registry lives in `backend/internal/providers`; unknown profiles and
@@ -276,7 +276,16 @@ Integration references: [Airflow 3.0.6 public API authentication](https://airflo
 [Airflow 3.0.6 REST API](https://airflow.apache.org/docs/apache-airflow/3.0.6/stable-rest-api-ref.html),
 [OpenAI create embeddings](https://developers.openai.com/api/reference/resources/embeddings/methods/create),
 [Hugging Face feature extraction](https://huggingface.co/docs/inference-providers/tasks/feature-extraction),
-and [OpenCode Go endpoints](https://dev.opencode.ai/docs/go/#endpoints).
+and [OpenCode Go endpoints](https://dev.opencode.ai/docs/go/#endpoints), plus
+[Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index). The
+testing-only `opencode-zen-big-pickle` profile uses OpenCode Zen's
+OpenAI-compatible endpoint (`OPENCODE_ZEN_BASE_URL`, default
+`https://opencode.ai/zen/v1`) and its free `big-pickle` model; its evaluator
+counterparts are `rubric-v1-big-pickle`, `rubric-v1-mimo-free`, and
+`rubric-v1-huggingface-gemma`. The Hugging Face fallback uses the
+OpenAI-compatible router at `https://router.huggingface.co/v1` and the
+configured `HF_TOKEN`; its cost remains unavailable unless the router exposes
+an explicit rate for the selected provider/model.
 
 ## Chat and traces (RB-09–RB-12 implemented)
 
@@ -330,7 +339,8 @@ Response `200 OK`:
 ```
 
 The query embedding, generation input, and generation output are the three
-cost components. Known OpenAI and OpenCode Go rates are explicit in
+cost components. Known OpenAI, OpenCode Go, and the explicit zero-rate
+OpenCode Zen Big Pickle test profile are recorded in
 `backend/internal/providers/providers.go`, and the query total is rounded to
 six decimal places in native USD. Provider-reported token fields and
 `estimated_cost` are `null` when usage is missing or pricing is unknown;
@@ -339,8 +349,8 @@ six decimal places in native USD. Provider-reported token fields and
 
 Provider selection comes from the immutable saved profiles, never from a
 request-supplied URL. The Go query path routes OpenAI profiles to the OpenAI v1
-wire contract, OpenCode Go to its OpenAI-compatible `/chat/completions`
-contract, and Hugging Face embeddings to the native feature-extraction
+wire contract, OpenCode Go and OpenCode Zen to their OpenAI-compatible
+`/chat/completions` contracts, and Hugging Face embeddings to the native feature-extraction
 contract (`inputs` in; a bare vector array out). Native Hugging Face responses
 do not report token usage, so their query cost is explicitly unavailable.
 

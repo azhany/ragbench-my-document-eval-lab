@@ -76,20 +76,51 @@ which explains the prior OpenAI HTTP 401 result.
   needs an authorized run that permits retrieved database chunks to be sent to
   the provider; no such payload was transmitted during this re-check.
 
+## OpenCode Zen free-model and Hugging Face fallback checks (2026-09-16)
+
+- The testing-only OpenCode Zen `big-pickle` profile completed one synthetic
+  grounded chat (trace `638a3a2d-a93a-4c7f-8cba-ed81721061d5`) and persisted
+  `model=big-pickle`; subsequent Big Pickle and `mimo-v2.5-free` requests
+  returned classified HTTP 429 rate limits.
+- Hugging Face's official OpenAI-compatible router accepted a synthetic
+  direct request for `google/gemma-3-4b-it:featherless-ai`, returning one
+  completion and token usage. After explicit HF corpus/evidence egress
+  authorization, application config `golden-huggingface-gemma-test`
+  attempted all 20 cases in run `c932892f-a85d-4bb0-9f26-d9631ca00717` and
+  finalized `partial` (3 completed with Recall@K/MRR 1.0 and judge scores
+  5/5, 16 query failures, and 1 evaluator failure). A subsequent 20-case run
+  `ab4d0402-d6f5-4953-8ce8-4a0ccc8be174` exhausted the account's HF inference
+  allowance: eight chat calls and twelve embeddings returned HTTP 402. The
+  run is visibly `failed`, with all 20 result rows and traces persisted.
+- The official Zen catalog's `ling-3.0-flash-fin-free` also accepted a
+  synthetic request when the required `X-OpenCode-Session` header was sent;
+  this was a provider-only fallback probe and was not used to claim a
+  corpus-backed result after HF embeddings became unavailable.
+
+## Browser verification after explicit HF authorization (2026-09-16)
+
+- The supplied Chromium headless-shell command from
+  `/var/folders/6l/hcvknbgs7v5f1trkgl3063l40000gn/T/opencode/rb12-browser`
+  reached the live frontend and received the expected provider HTTP 502 once
+  HF credits were exhausted.
+- A companion walkthrough in the same directory passed 6/6 checks: HF config
+  selection, historical successful HF trace opening, retrieved-context
+  rendering, visible 502 handling, distinct `provider-failure` UI state, and
+  persisted failure-trace link.
+
 ## Criteria status
 
 - RB-07: all acceptance criteria and verification checks pass.
-- RB-08: provider-backed lifecycle passes; browser walkthrough and successful
-  trace-history inspection remain open.
+- RB-08: provider-backed lifecycle passes; the authorized browser companion
+  inspected historical trace/config/evidence and visible provider failures.
 - RB-09: all acceptance criteria and verification checks pass.
-- RB-10: OpenAI-compatible contract and live synthetic generation pass; a
-  grounded answer/citations smoke remains to be authorized.
-- RB-11: cost/persistence/error criteria and the prior classified 429 trace
-  pass; a current successful application trace and post-delete walkthrough
-  remain open.
-- RB-12: component criteria pass and the live provider 429 blocker is cleared;
-  successful browser walkthrough remains open because no browser surface was
-  available.
+- RB-10: OpenAI-compatible contract, live synthetic generation, and a grounded
+  answer/citations trace pass; the current HF account is now blocked by HTTP
+  402 quota exhaustion.
+- RB-11: cost/persistence/error criteria and historical grounded traces pass;
+  current HF failures remain classified and inspectable rather than hidden.
+- RB-12: component criteria pass; the authorized headless browser companion
+  covers historical successful-trace inspection and the provider-failure UI.
 
 ## Grounded chat and lifecycle close-out (2026-09-16)
 
@@ -102,8 +133,9 @@ which explains the prior OpenAI HTTP 401 result.
   retrieval, prompt_build, llm_generation, and citation_mapping.
 - Reprocessing the cited PDF and tombstone-deleting the cited DOCX left the
   historical trace fully inspectable via `GET /api/v1/traces/{id}`.
-- This closes the outstanding verification for RB-10 and RB-11 (RB-12's
-  browser walkthrough remains open, no browser surface available).
+- This closes the outstanding verification for RB-10 and RB-11; the current
+  HF quota blocker is recorded separately above and remains visible in the
+  failure run.
 
 ## RB-12 browser walkthrough close-out (2026-09-16)
 

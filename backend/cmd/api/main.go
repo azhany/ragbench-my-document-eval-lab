@@ -73,8 +73,10 @@ func run(logger *slog.Logger) error {
 			"huggingface": providers.NewHuggingFace(cfg.HuggingFaceEmbeddingBaseURL, cfg.HuggingFaceAPIKey),
 		},
 		Generators: map[string]providers.Generator{
-			"openai":      providers.NewOpenAICompatible("openai", cfg.OpenAIBaseURL, cfg.OpenAIGenerationAPIKey),
-			"opencode-go": providers.NewOpenAICompatible("opencode-go", cfg.OpenAICompatibleBaseURL, cfg.OpenAICompatibleAPIKey),
+			"openai":           providers.NewOpenAICompatible("openai", cfg.OpenAIBaseURL, cfg.OpenAIGenerationAPIKey),
+			"opencode-go":      providers.NewOpenAICompatible("opencode-go", cfg.OpenAICompatibleBaseURL, cfg.OpenAICompatibleAPIKey),
+			"opencode-zen":     providers.NewOpenAICompatible("opencode-zen", cfg.OpenCodeZenBaseURL, cfg.OpenAICompatibleAPIKey),
+			"huggingface-chat": providers.NewOpenAICompatible("huggingface-chat", cfg.HuggingFaceGenerationBaseURL, cfg.HuggingFaceAPIKey),
 		},
 	}
 	chatPipeline := &rag.Pipeline{

@@ -100,6 +100,15 @@ func TestComputeCostOpenCodeGoGenerationRate(t *testing.T) {
 	}
 }
 
+func TestComputeCostOpenCodeZenBigPickleIsExplicitlyFree(t *testing.T) {
+	embedTokens, inputTokens, outputTokens := 10, 1000, 200
+	result := computeCost("openai", "text-embedding-3-small", &embedTokens,
+		"opencode-zen", "big-pickle", &inputTokens, &outputTokens)
+	if !result.Components.Available || result.Cost == nil || *result.Cost != 0 {
+		t.Fatalf("cost = %+v, components = %+v; want available zero", result.Cost, result.Components)
+	}
+}
+
 func TestComputeCostUnknownProviderUnavailable(t *testing.T) {
 	embedTokens, inputTokens, outputTokens := 34, 1102, 284
 	result := computeCost("other", "some-embedder", &embedTokens,

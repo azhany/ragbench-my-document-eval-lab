@@ -20,6 +20,7 @@ BASE = os.environ.get("API_URL", "http://localhost:8080")
 FIXTURE = "db/fixtures/golden_dataset_v1.json"
 CORPUS_DIR = "db/fixtures/corpus"
 CONFIG_NAME = os.environ.get("GOLDEN_CONFIG_NAME", "golden-demo-hf")
+MODEL_PROFILE = os.environ.get("GOLDEN_MODEL_PROFILE", "opencode-go-glm-5.3-flash")
 DATASET_NAME = "golden-dataset-v1"
 WAIT_SECONDS = int(os.environ.get("SEED_WAIT_SECONDS", "600"))
 
@@ -62,7 +63,7 @@ def ensure_config(configs):
             "top_k": 5,
             "rerank_enabled": False,
             "prompt_version": "v1",
-            "model_profile": "opencode-go-glm-5.3-flash",
+            "model_profile": MODEL_PROFILE,
             "embedding_profile": "huggingface-bge-small-en-v1.5",
         })
         print(f"rag config created: {CONFIG_NAME} -> {created['id']}")

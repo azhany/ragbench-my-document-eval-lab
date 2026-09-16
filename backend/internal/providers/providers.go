@@ -65,6 +65,25 @@ var generationProfiles = map[string]GenerationProfile{
 		Provider: "opencode-go",
 		Model:    "glm-5.3-flash",
 	},
+	// OpenCode Zen's free Big Pickle model is an explicit testing profile;
+	// production defaults remain pinned to opencode-go.
+	"opencode-zen-big-pickle": {
+		Name:     "opencode-zen-big-pickle",
+		Provider: "opencode-zen",
+		Model:    "big-pickle",
+	},
+	"opencode-zen-mimo-v2.5-free": {
+		Name:     "opencode-zen-mimo-v2.5-free",
+		Provider: "opencode-zen",
+		Model:    "mimo-v2.5-free",
+	},
+	// HF's OpenAI-compatible router is a testing-only generation fallback;
+	// the provider/model identity remains explicit in every saved run.
+	"huggingface-gemma-3-4b-it-free": {
+		Name:     "huggingface-gemma-3-4b-it-free",
+		Provider: "huggingface-chat",
+		Model:    "google/gemma-3-4b-it:featherless-ai",
+	},
 }
 
 var prompts = map[string]Prompt{
@@ -144,6 +163,96 @@ ANSWER:
 EVIDENCE retrieved by the system:
 {{CITED_EVIDENCE}}`,
 	},
+	"rubric-v1-big-pickle": {
+		Version:       "rubric-v1-big-pickle",
+		Identifier:    "relevance-groundedness-1-5",
+		JudgeProvider: "opencode-zen",
+		JudgeModel:    "big-pickle",
+		Template: `You are a strict evaluator scoring a RAG system's answer.
+
+Score the ANSWER on answer relevance: does it directly address the QUESTION
+(1 = unrelated, 5 = complete and on point)?
+
+Score the ANSWER on groundedness: are its claims supported by the numbered
+EVIDENCE the system retrieved (1 = unsupported, 5 = fully supported by
+evidence)? Outside knowledge in the answer lowers this score.
+
+Reply with exactly one JSON object, no other text:
+{"answer_relevance": {"score": <1-5>, "rationale": "<one concise sentence>"},
+ "groundedness":    {"score": <1-5>, "rationale": "<one concise sentence>"}}
+
+QUESTION:
+{{QUESTION}}
+
+REFERENCE ANSWER (context only; do not copy):
+{{REFERENCE_ANSWER}}
+
+ANSWER:
+{{ANSWER}}
+
+EVIDENCE retrieved by the system:
+	{{CITED_EVIDENCE}}`,
+	},
+	"rubric-v1-mimo-free": {
+		Version:       "rubric-v1-mimo-free",
+		Identifier:    "relevance-groundedness-1-5",
+		JudgeProvider: "opencode-zen",
+		JudgeModel:    "mimo-v2.5-free",
+		Template: `You are a strict evaluator scoring a RAG system's answer.
+
+Score the ANSWER on answer relevance: does it directly address the QUESTION
+(1 = unrelated, 5 = complete and on point)?
+
+Score the ANSWER on groundedness: are its claims supported by the numbered
+EVIDENCE the system retrieved (1 = unsupported, 5 = fully supported by
+evidence)? Outside knowledge in the answer lowers this score.
+
+Reply with exactly one JSON object, no other text:
+{"answer_relevance": {"score": <1-5>, "rationale": "<one concise sentence>"},
+ "groundedness":    {"score": <1-5>, "rationale": "<one concise sentence>"}}
+
+QUESTION:
+{{QUESTION}}
+
+REFERENCE ANSWER (context only; do not copy):
+{{REFERENCE_ANSWER}}
+
+ANSWER:
+{{ANSWER}}
+
+EVIDENCE retrieved by the system:
+		{{CITED_EVIDENCE}}`,
+	},
+	"rubric-v1-huggingface-gemma": {
+		Version:       "rubric-v1-huggingface-gemma",
+		Identifier:    "relevance-groundedness-1-5",
+		JudgeProvider: "huggingface-chat",
+		JudgeModel:    "google/gemma-3-4b-it:featherless-ai",
+		Template: `You are a strict evaluator scoring a RAG system's answer.
+
+Score the ANSWER on answer relevance: does it directly address the QUESTION
+(1 = unrelated, 5 = complete and on point)?
+
+Score the ANSWER on groundedness: are its claims supported by the numbered
+EVIDENCE the system retrieved (1 = unsupported, 5 = fully supported by
+evidence)? Outside knowledge in the answer lowers this score.
+
+Reply with exactly one JSON object, no other text:
+{"answer_relevance": {"score": <1-5>, "rationale": "<one concise sentence>"},
+ "groundedness":    {"score": <1-5>, "rationale": "<one concise sentence>"}}
+
+QUESTION:
+{{QUESTION}}
+
+REFERENCE ANSWER (context only; do not copy):
+{{REFERENCE_ANSWER}}
+
+ANSWER:
+{{ANSWER}}
+
+EVIDENCE retrieved by the system:
+{{CITED_EVIDENCE}}`,
+	},
 }
 
 // RubricByVersion returns the registered judge rubric with the given version,
@@ -181,6 +290,12 @@ var modelPrices = map[string]map[string]ModelRate{
 	},
 	"opencode-go": {
 		"glm-5.3-flash": {InputPerMillion: 0.15, OutputPerMillion: 0.50},
+	},
+	"opencode-zen": {
+		// Big Pickle is listed as free by OpenCode Zen. Keep an explicit
+		// zero-rate entry so reported usage produces an available $0 cost.
+		"big-pickle":     {InputPerMillion: 0, OutputPerMillion: 0},
+		"mimo-v2.5-free": {InputPerMillion: 0, OutputPerMillion: 0},
 	},
 }
 

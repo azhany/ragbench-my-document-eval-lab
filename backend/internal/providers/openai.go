@@ -286,6 +286,11 @@ func responseModelMatches(requested, returned string) bool {
 	if returned == requested {
 		return true
 	}
+	// HF's router accepts a provider suffix (model:provider) but returns the
+	// canonical repository id in the completion envelope.
+	if suffix := strings.IndexByte(requested, ':'); suffix > 0 && returned == requested[:suffix] {
+		return true
+	}
 	return requested == "gpt-4o-mini" && returned == "gpt-4o-mini-2024-07-18"
 }
 
@@ -305,7 +310,7 @@ func (o *OpenAI) post(ctx context.Context, path string, body []byte) ([]byte, er
 	req.Header.Set("Authorization", "Bearer "+o.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "ragbench-my/1.0")
-	if o.provider() == "opencode-go" {
+	if o.provider() == "opencode-go" || o.provider() == "opencode-zen" {
 		req.Header.Set("X-OpenCode-Session", newSessionID())
 	}
 	for name, value := range o.Headers {

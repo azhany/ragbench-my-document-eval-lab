@@ -174,6 +174,49 @@ func TestOpenAICompatibleGenerationUsesConfiguredProviderAndEndpoint(t *testing.
 	}
 }
 
+func TestOpenCodeZenGenerationUsesSessionHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("X-OpenCode-Session") == "" {
+			t.Error("x-opencode-session header is required")
+		}
+		writeJSON(t, w, map[string]any{
+			"model": "big-pickle", "choices": []any{map[string]any{
+				"message": map[string]any{"content": "Answer [1]."}}},
+		})
+	}))
+	defer server.Close()
+	client := NewOpenAICompatible("opencode-zen", server.URL+"/v1", "zen-key")
+	result, err := client.Generate(context.Background(), GenerationProfile{
+		Name: "opencode-zen-big-pickle", Provider: "opencode-zen", Model: "big-pickle",
+	}, "prompt")
+	if err != nil || result.Text != "Answer [1]." {
+		t.Fatalf("Generate() = %+v, %v", result, err)
+	}
+}
+
+func TestHuggingFaceRouterAcceptsProviderSuffixResponseModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		writeJSON(t, w, map[string]any{
+			"model": "google/gemma-3-4b-it", "choices": []any{map[string]any{
+				"message": map[string]any{"content": "OK"}}},
+		})
+	}))
+	defer server.Close()
+	client := NewOpenAICompatible("huggingface-chat", server.URL+"/v1", "hf-key")
+	result, err := client.Generate(context.Background(), GenerationProfile{
+		Name: "huggingface-gemma-3-4b-it-free", Provider: "huggingface-chat", Model: "google/gemma-3-4b-it:featherless-ai",
+	}, "prompt")
+	if err != nil || result.Text != "OK" {
+		t.Fatalf("Generate() = %+v, %v", result, err)
+	}
+}
+
 func TestOpenAIGenerateClassifiesHTTPAndMalformedFailures(t *testing.T) {
 	cases := []struct {
 		name     string

@@ -22,8 +22,8 @@ const (
 type EvaluatorPolicyVersioned struct {
 	PolicyVersion string `json:"policy_version"`
 	// RubricVersion is the versioned judge rubric (model + template identity
-	// in providers). "rubric-v1" is the only registered version now; unknown
-	// versions fail validation instead of scoring with something newer.
+	// in providers). Unknown versions fail validation instead of scoring with
+	// something newer.
 	RubricVersion string `json:"rubric_version"`
 	// ScoringK is the K used for Recall@K evaluation.
 	ScoringK int `json:"scoring_k"`
