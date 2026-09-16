@@ -140,10 +140,10 @@ server-side from the registry and persisted with the profile key, so the exact
 embedding identity used survives registry changes.
 
 `unavailable_capabilities` lists requested features the stack cannot execute
-yet: `"hybrid_retrieval"` until RB-17, `"rerank"` until RB-25. Such
-configurations can be saved, but every execution path (chat, evaluation) must
-reject them with `422 capability_unavailable` — never silently degrade to
-vector/no-rerank.
+yet: `"rerank"` until RB-25. Hybrid retrieval is executable through the
+persisted FTS+RRF settings; rerank configurations can be saved, but every
+execution path (chat, evaluation) must reject them with
+`422 capability_unavailable` — never silently degrade to no-rerank.
 
 Errors:
 

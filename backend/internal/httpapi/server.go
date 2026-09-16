@@ -60,9 +60,7 @@ type EvalOptions struct {
 }
 
 func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, eval EvalOptions, readinessChecks ...health.NamedCheck) http.Handler {
-	s := &server{logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces,
-		datasets: eval.Datasets, runs: eval.Runs, experiments: eval.Experiments,
-		dispatcher: eval.Dispatcher, executor: eval.Executor}
+	s := newServer(logger, configs, opts, chatPipeline, traces, eval)
 
 	mux := http.NewServeMux()
 
@@ -110,6 +108,14 @@ func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chat
 	}
 
 	return logMiddleware(logger, mux)
+}
+
+func newServer(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, eval EvalOptions) *server {
+	return &server{
+		logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces,
+		datasets: eval.Datasets, runs: eval.Runs, experiments: eval.Experiments,
+		orchestrator: eval.Orchestrator, dispatcher: eval.Dispatcher, executor: eval.Executor,
+	}
 }
 
 type serviceInfo struct {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ragbench-my/backend/internal/ragconfig"
@@ -23,13 +24,39 @@ type IndexPlanner struct {
 
 func NewIndexPlanner(pool *pgxpool.Pool) *IndexPlanner { return &IndexPlanner{pool: pool} }
 
-// ReindexNeeded returns true when at least one live document has no active
-// ready revision matching the configuration's chunk_size, chunk_overlap and
-// embedding identity. Live documents with no revision at all also count:
-// the corpus is not searchable under this configuration.
+// ReindexNeeded returns an error when a latest attempted revision for this
+// configuration failed, so callers can terminally mark the combination
+// instead of waiting forever. Otherwise it returns true when at least one
+// live document has no active ready revision matching the configuration's
+// chunk_size, chunk_overlap and embedding identity. Live documents with no
+// revision at all also count: the corpus is not searchable under this
+// configuration.
 func (p *IndexPlanner) ReindexNeeded(ctx context.Context, cfg ragconfig.Config) (bool, error) {
-	var missing int
+	var filename, errorCode, errorMessage string
 	err := p.pool.QueryRow(ctx, `
+		SELECT d.filename, COALESCE(r.error_code, ''), COALESCE(j.error_message, '')
+		FROM documents d
+		JOIN index_revisions r ON r.id = d.latest_revision_id
+		LEFT JOIN ingestion_jobs j ON j.index_revision_id = r.id
+		WHERE d.deleted_at IS NULL
+		  AND r.status = 'failed'
+		  AND r.chunk_size = $1 AND r.chunk_overlap = $2
+		  AND r.embedding_provider = $3
+		  AND r.embedding_model = $4
+		  AND r.embedding_dimensions = $5
+		ORDER BY d.id
+		LIMIT 1`,
+		cfg.ChunkSize, cfg.ChunkOverlap, cfg.EmbeddingProvider, cfg.EmbeddingModel, cfg.EmbeddingDimensions,
+	).Scan(&filename, &errorCode, &errorMessage)
+	if err == nil {
+		return false, fmt.Errorf("latest reindex for document %s failed (%s): %s", filename, errorCode, errorMessage)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+
+	var missing int
+	err = p.pool.QueryRow(ctx, `
 		SELECT count(*)
 		FROM documents d
 		WHERE d.deleted_at IS NULL
