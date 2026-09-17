@@ -1,6 +1,6 @@
 # Sprint Plan and Implementation Stories
 
-Status: implementation in progress. Story files record current completion and outstanding verification gates. Sprints 1–3 are implemented (with recorded open real-provider/browser gates); Sprint 4 (RB-13–RB-16) and Sprint 5 (RB-17–RB-20) are implemented with unit + PostgreSQL integration tests passing and a live API smoke; the remaining open gates are the real-provider runs (golden dataset scoring run, hybrid-vs-vector run, live sweep browser verification) recorded in each story file.
+Status: implementation in progress. Story files record current completion and outstanding verification gates. Sprints 1–3 are implemented (with recorded open real-provider/browser gates); Sprint 4 (RB-13–RB-16) and Sprint 5 (RB-17–RB-20) are implemented with unit + PostgreSQL integration tests passing and a live API smoke; Sprint 7 is the document-intelligence continuation. The Settings catalog, Settings UI, and dashboard visual refresh are intentionally delivered together as Sprint 8.
 
 ## 1. Baseline and planning assumptions
 
@@ -15,7 +15,11 @@ story files; real query embedding/retrieval and classified provider failure
 pass, while successful generation (OpenCode Go HTTP 429) and browser gates
 remain open.
 
-Proposed cadence: six two-week iterations. This is a sequencing proposal, not a twelve-week delivery commitment: team capacity, provider access, and actual velocity are unknown. At sprint planning, select a dependency-complete subset that fits capacity; split large stories along their acceptance criteria rather than declaring partial features done.
+Proposed cadence: the original six two-week iterations, followed by focused
+continuation sprints as needed. Sprint 8 is intentionally one bounded,
+dependency-complete increment containing all Settings/catalog/UI stories.
+This is a sequencing proposal, not a delivery commitment: team capacity,
+provider access, and actual velocity are unknown.
 
 - **Priority:** P0 = prerequisite/core workflow; P1 = required PoC completeness; P2 = explicitly optional enhancement.
 - **Size:** S = one bounded integration; M = several related components; L = cross-service or algorithmic work requiring refinement before commitment. Sizes are relative, not person-day estimates.
@@ -32,11 +36,11 @@ Proposed cadence: six two-week iterations. This is a sequencing proposal, not a 
 | [Architecture](../ARCHITECTURE.md) | Go query pipeline, Airflow batch ownership, PostgreSQL durability |
 | [Repository rules](../AGENTS.md) | Small packages, persisted configuration, traceability, feature definition of done |
 | [API contract](API.md) | Existing endpoint names and chat/trace response shape |
-| [Data model](DATA_MODEL.md) | Nine planned application tables |
+| [Data model](DATA_MODEL.md) | Persisted application tables and evidence contracts |
 | [Evaluation design](EVALUATION.md) | 20–40 golden cases, separate quality/efficiency metrics, example regression policy |
 | [Monitoring design](MONITORING.md) | Quality, reliability, performance, cost, failure taxonomy |
 | [Test plan](TEST_PLAN.md) | Scoring/cost rules, integration paths, poor-retrieval demonstration |
-| [UI design](UI.md) | Six navigation destinations and evidence-to-trace interaction |
+| [UI design](UI.md) | Current workspace destinations and evidence-to-trace interaction |
 | [DAG backlog](../airflow/dags/README.md) | Ingestion, reindex, evaluation, parameter-sweep DAGs |
 
 ### Architecture constraints
@@ -79,10 +83,16 @@ These are **proposals or unresolved contract details**, not requirements already
 | 5 — Measurable experiments | Compare configurations and detect explicit regressions | RB-17–RB-20 | Two compatible runs show metric deltas and reasons for regression; a small parameter sweep completes |
 | 6 — Observable PoC | Connect monitoring, scheduled checks, and the complete demonstration | RB-21–RB-24 | Fresh local startup supports all five PRD success criteria and the poor-retrieval failure-mode demo |
 | 7 — Document intelligence assessment | Process a financial PDF/image into validated structured data plus a concise summary, using the existing production-minded platform | RB-27–RB-32 | Upload a PDF/JPG/PNG invoice or receipt; persist raw extraction; produce schema-valid structured data; execute deterministic validation before summary generation; inspect trace/usage/latency/error evidence; reviewer can reproduce from README |
+| 8 — Settings-managed RAG workspace | Configure model identities and RAG runs from the UI, then bring the current sitemap closer to the dashboard mockup | RB-33–RB-35 | Open Settings, add/select a provider model, save an immutable RAG configuration, and see the same persisted identity available to Library/Chat/Evaluations/Experiments inside the refreshed shell |
 
 Main dependency chain: foundation → indexed library → traced chat → scored evaluations → comparison → integrated demonstration. Monitoring signals are added in each story, not postponed until Sprint 6. Sprint 6 aggregates and exposes them.
 
 Sprint 7 depends on the durable document lifecycle/provider/trace foundations established earlier, but its financial-document result is independent from RAG chat. Retrieval over historical financial documents is an optional extension, not a prerequisite for mandatory structured extraction.
+
+Sprint 8 is a single cross-cutting increment: all three stories share the
+Settings/API contract and land in one sprint. It preserves the six existing
+workspace destinations and adds only the Settings/Infrastructure surfaces
+needed by the dashboard mockup.
 
 Within a sprint, independent work can proceed after shared contracts are fixed: extraction and Library UI after the upload contract; scoring and evaluation UI after result schemas; comparison and sweep orchestration after configuration/run identity. Shared schema/API changes need one integration owner.
 
@@ -145,6 +155,12 @@ Every story inherits the [shared definition of ready and done](#5-shared-definit
 - [RB-31 — Trace, evaluate, and guard the document-intelligence workflow](stories/RB-31.md)
 - [RB-32 — Package reproducible assessment evidence and engineering notes](stories/RB-32.md)
 
+### Sprint 8 — Settings-managed RAG workspace
+
+- [RB-33 — Manage provider and model profiles in Settings](stories/RB-33.md)
+- [RB-34 — Build RAG configurations from the Settings UI](stories/RB-34.md)
+- [RB-35 — Refresh the dashboard shell and integrate the current sitemap](stories/RB-35.md)
+
 ### Optional backlog — not required for the six-sprint core gate
 
 - [RB-25 — Enable real reranking as an experiment dimension](stories/RB-25.md)
@@ -183,7 +199,9 @@ Every story inherits the [shared definition of ready and done](#5-shared-definit
 | Ingestion, reindex, evaluation, parameter-sweep DAGs | RB-05–RB-08, RB-14, RB-18 |
 | Scheduled regression checks | RB-23 |
 | Quality/reliability/performance/cost monitoring | RB-11, RB-15, RB-19, RB-21, RB-22 |
-| Overview, Library, Chat, Evaluations, Experiments, Monitor | RB-04, RB-08, RB-12, RB-16, RB-20, RB-22 |
+| Overview, Library, Chat, Evaluations, Experiments, Monitor, Settings | RB-04, RB-08, RB-12, RB-16, RB-20, RB-22, RB-33–RB-35 |
+| Persisted Settings model catalog and UI-created RAG configurations | RB-33–RB-35 |
+| Dashboard-style shell, navigation, provider-safe settings states | RB-35 |
 | Retrieval/cost/comparison unit rules and integration paths | RB-05, RB-07, RB-09, RB-11, RB-14, RB-15, RB-17, RB-19, RB-24 |
 | Whole-stack startup and poor-retrieval demonstration | RB-01, RB-24 |
 | Financial PDF/image upload, durable identity, status | RB-27 |

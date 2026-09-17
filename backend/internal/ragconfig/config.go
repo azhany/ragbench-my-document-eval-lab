@@ -1,11 +1,13 @@
 // Package ragconfig holds the immutable RAG configuration domain: validation
-// against explicit bounds and the provider registry, and PostgreSQL storage.
+// against explicit bounds and the persisted Settings catalog, and PostgreSQL
+// storage.
 // Configurations are immutable identities — there is intentionally no update
 // or delete; changing settings means saving a new configuration under a new
 // name so historical runs keep pointing at the settings that produced them.
 package ragconfig
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,6 +70,8 @@ type Config struct {
 	VectorCandidateLimit int       `json:"vector_candidate_limit"`
 	PromptVersion        string    `json:"prompt_version"`
 	ModelProfile         string    `json:"model_profile"`
+	ModelProvider        string    `json:"model_provider"`
+	ModelName            string    `json:"model_name"`
 	EmbeddingProfile     string    `json:"embedding_profile"`
 	EmbeddingProvider    string    `json:"embedding_provider"`
 	EmbeddingModel       string    `json:"embedding_model"`
@@ -82,17 +86,21 @@ type Config struct {
 
 // CreateRequest is the API payload for saving a new configuration.
 type CreateRequest struct {
-	Name                 string `json:"name"`
-	ChunkSize            int    `json:"chunk_size"`
-	ChunkOverlap         int    `json:"chunk_overlap"`
-	RetrievalMode        string `json:"retrieval_mode"`
-	TopK                 int    `json:"top_k"`
-	RerankEnabled        bool   `json:"rerank_enabled"`
-	RerankerProfile      string `json:"reranker_profile"`
-	RerankCandidateLimit int    `json:"rerank_candidate_limit"`
-	PromptVersion        string `json:"prompt_version"`
-	ModelProfile         string `json:"model_profile"`
-	EmbeddingProfile     string `json:"embedding_profile"`
+	Name                 string  `json:"name"`
+	ChunkSize            int     `json:"chunk_size"`
+	ChunkOverlap         int     `json:"chunk_overlap"`
+	RetrievalMode        string  `json:"retrieval_mode"`
+	TopK                 int     `json:"top_k"`
+	RerankEnabled        bool    `json:"rerank_enabled"`
+	RerankerProfile      string  `json:"reranker_profile"`
+	RerankCandidateLimit int     `json:"rerank_candidate_limit"`
+	FusionMethod         string  `json:"fusion_method"`
+	RRFConstant          float64 `json:"rrf_rank_constant"`
+	FTSCandidateLimit    int     `json:"fts_candidate_limit"`
+	VectorCandidateLimit int     `json:"vector_candidate_limit"`
+	PromptVersion        string  `json:"prompt_version"`
+	ModelProfile         string  `json:"model_profile"`
+	EmbeddingProfile     string  `json:"embedding_profile"`
 }
 
 // FieldError is one field-level validation violation.
@@ -135,8 +143,8 @@ func (e *CapabilityUnavailableError) Error() string {
 		e.Capability)
 }
 
-// Resolved is a validated creation request with the embedding identity
-// resolved from the registry.
+// Resolved is a validated creation request with model identities resolved from
+// the Settings catalog (or the legacy built-in catalog for pure callers).
 type Resolved struct {
 	Name                 string
 	ChunkSize            int
@@ -146,19 +154,59 @@ type Resolved struct {
 	RerankEnabled        bool
 	RerankerProfile      string
 	RerankCandidateLimit int
+	FusionMethod         string
+	RRFConstant          float64
+	FTSCandidateLimit    int
+	VectorCandidateLimit int
 	PromptVersion        string
 	ModelProfile         string
+	ModelProvider        string
+	ModelName            string
 	EmbeddingProfile     string
 	EmbeddingProvider    string
 	EmbeddingModel       string
 	EmbeddingDimensions  int
 }
 
-// Resolve validates the request against explicit bounds and the provider
-// registry, returning every violation at once. The embedding identity is
-// resolved server-side and persisted alongside the profile key so the exact
-// provider/model/dimensions used survive registry changes.
+// ProfileResolver is the small boundary between configuration validation and
+// the persisted Settings catalog. Keeping it here means the RAG config domain
+// does not know how model profiles are stored, while tests can still use the
+// built-in registry through Resolve.
+type ProfileResolver interface {
+	GenerationProfile(context.Context, string) (providers.GenerationProfile, error)
+	EmbeddingProfile(context.Context, string) (providers.EmbeddingProfile, error)
+}
+
+type registryResolver struct{}
+
+func (registryResolver) GenerationProfile(_ context.Context, name string) (providers.GenerationProfile, error) {
+	return providers.GenerationProfileByName(name)
+}
+
+func (registryResolver) EmbeddingProfile(_ context.Context, name string) (providers.EmbeddingProfile, error) {
+	return providers.EmbeddingProfileByName(name)
+}
+
+// Resolve validates against the built-in catalog. It remains useful for pure
+// domain tests and compatibility callers; the PostgreSQL Store uses
+// ResolveWithProfiles so Settings-created profiles are accepted at runtime.
 func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
+	return resolve(context.Background(), req, registryResolver{})
+}
+
+// ResolveWithProfiles validates against the persisted Settings catalog.
+func ResolveWithProfiles(ctx context.Context, req CreateRequest, resolver ProfileResolver) (Resolved, ValidationErrors) {
+	if resolver == nil {
+		resolver = registryResolver{}
+	}
+	return resolve(ctx, req, resolver)
+}
+
+// resolve validates the request against explicit bounds and the selected
+// profile catalog, returning every violation at once. Model identities are
+// resolved server-side and persisted alongside their profile keys so the exact
+// provider/model/dimensions used survive catalog changes.
+func resolve(ctx context.Context, req CreateRequest, resolver ProfileResolver) (Resolved, ValidationErrors) {
 	var errs ValidationErrors
 
 	name := strings.TrimSpace(req.Name)
@@ -186,6 +234,39 @@ func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
 			Message: fmt.Sprintf("top_k must be between %d and %d", MinTopK, MaxTopK)})
 	}
 
+	fusionMethod := strings.TrimSpace(req.FusionMethod)
+	if fusionMethod == "" {
+		fusionMethod = FusionMethodRRF
+	}
+	if fusionMethod != FusionMethodRRF {
+		errs = append(errs, FieldError{Field: "fusion_method",
+			Message: fmt.Sprintf("fusion_method must be %q", FusionMethodRRF)})
+	}
+	rrfConstant := req.RRFConstant
+	if rrfConstant == 0 {
+		rrfConstant = DefaultRRFConstant
+	}
+	if rrfConstant < MinRRFConstant || rrfConstant > MaxRRFConstant {
+		errs = append(errs, FieldError{Field: "rrf_rank_constant",
+			Message: fmt.Sprintf("rrf_rank_constant must be between %d and %d", MinRRFConstant, MaxRRFConstant)})
+	}
+	ftsCandidateLimit := req.FTSCandidateLimit
+	if ftsCandidateLimit == 0 {
+		ftsCandidateLimit = DefaultCandidateLimit
+	}
+	if ftsCandidateLimit < MinRerankCandidateLimit || ftsCandidateLimit > MaxRerankCandidateLimit {
+		errs = append(errs, FieldError{Field: "fts_candidate_limit",
+			Message: fmt.Sprintf("fts_candidate_limit must be between %d and %d", MinRerankCandidateLimit, MaxRerankCandidateLimit)})
+	}
+	vectorCandidateLimit := req.VectorCandidateLimit
+	if vectorCandidateLimit == 0 {
+		vectorCandidateLimit = DefaultCandidateLimit
+	}
+	if vectorCandidateLimit < MinRerankCandidateLimit || vectorCandidateLimit > MaxRerankCandidateLimit {
+		errs = append(errs, FieldError{Field: "vector_candidate_limit",
+			Message: fmt.Sprintf("vector_candidate_limit must be between %d and %d", MinRerankCandidateLimit, MaxRerankCandidateLimit)})
+	}
+
 	rerankerProfile := strings.TrimSpace(req.RerankerProfile)
 	if rerankerProfile == "" {
 		rerankerProfile = DefaultRerankerProfile
@@ -209,18 +290,19 @@ func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
 	if _, err := providers.PromptByVersion(strings.TrimSpace(req.PromptVersion)); err != nil {
 		errs = append(errs, FieldError{Field: "prompt_version", Message: err.Error()})
 	}
-	if _, err := providers.GenerationProfileByName(strings.TrimSpace(req.ModelProfile)); err != nil {
-		errs = append(errs, FieldError{Field: "model_profile", Message: err.Error()})
+	generationProfile, generationErr := resolver.GenerationProfile(ctx, strings.TrimSpace(req.ModelProfile))
+	if generationErr != nil {
+		errs = append(errs, FieldError{Field: "model_profile", Message: generationErr.Error()})
 	}
-	if _, err := providers.EmbeddingProfileByName(strings.TrimSpace(req.EmbeddingProfile)); err != nil {
-		errs = append(errs, FieldError{Field: "embedding_profile", Message: err.Error()})
+	embeddingProfile, embeddingErr := resolver.EmbeddingProfile(ctx, strings.TrimSpace(req.EmbeddingProfile))
+	if embeddingErr != nil {
+		errs = append(errs, FieldError{Field: "embedding_profile", Message: embeddingErr.Error()})
 	}
 
 	if len(errs) > 0 {
 		return Resolved{}, errs
 	}
 
-	embedding, _ := providers.EmbeddingProfileByName(strings.TrimSpace(req.EmbeddingProfile))
 	return Resolved{
 		Name:                 name,
 		ChunkSize:            req.ChunkSize,
@@ -230,12 +312,18 @@ func Resolve(req CreateRequest) (Resolved, ValidationErrors) {
 		RerankEnabled:        req.RerankEnabled,
 		RerankerProfile:      rerankerProfile,
 		RerankCandidateLimit: req.RerankCandidateLimit,
+		FusionMethod:         fusionMethod,
+		RRFConstant:          rrfConstant,
+		FTSCandidateLimit:    ftsCandidateLimit,
+		VectorCandidateLimit: vectorCandidateLimit,
 		PromptVersion:        strings.TrimSpace(req.PromptVersion),
 		ModelProfile:         strings.TrimSpace(req.ModelProfile),
-		EmbeddingProfile:     embedding.Name,
-		EmbeddingProvider:    embedding.Provider,
-		EmbeddingModel:       embedding.Model,
-		EmbeddingDimensions:  embedding.Dimensions,
+		ModelProvider:        generationProfile.Provider,
+		ModelName:            generationProfile.Model,
+		EmbeddingProfile:     embeddingProfile.Name,
+		EmbeddingProvider:    embeddingProfile.Provider,
+		EmbeddingModel:       embeddingProfile.Model,
+		EmbeddingDimensions:  embeddingProfile.Dimensions,
 	}, nil
 }
 

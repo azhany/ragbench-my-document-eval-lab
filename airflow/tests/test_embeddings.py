@@ -63,9 +63,9 @@ class EmbeddingTests(unittest.TestCase):
                          "https://hf.test/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction")
         self.assertEqual(json.loads(sent.data), {"inputs": ["a", "b"], "normalize": True})
 
-    def test_rejects_unregistered_provider_model_dimension_tuple(self):
+    def test_rejects_unconfigured_embedding_provider(self):
         with self.assertRaises(IngestionError) as caught:
-            embed_chunks([{"content": "a"}], "huggingface", "unknown/model", 384,
+            embed_chunks([{"content": "a"}], "unknown-provider", "unknown/model", 384,
                          ProviderDouble(), 1)
         self.assertEqual(caught.exception.code, "embedding_failed")
 

@@ -152,7 +152,16 @@ func (s *Store) Create(ctx context.Context, datasets evalrun.DatasetReader, conf
 	// identity before persistence: invalid or unsupported combinations are
 	// rejected up front, never silently degrading.
 	for i, c := range combos {
-		if _, verrs := ragconfig.Resolve(c.configRequest(expConfigName(req.Name, i+1))); len(verrs) > 0 {
+		request := c.configRequest(expConfigName(req.Name, i+1))
+		var verrs ragconfig.ValidationErrors
+		if validator, ok := configs.(interface {
+			Validate(context.Context, ragconfig.CreateRequest) (ragconfig.Resolved, ragconfig.ValidationErrors)
+		}); ok {
+			_, verrs = validator.Validate(ctx, request)
+		} else {
+			_, verrs = ragconfig.Resolve(request)
+		}
+		if len(verrs) > 0 {
 			return Experiment{}, fmt.Errorf("combination %d is invalid: %v", i+1, verrs)
 		}
 	}

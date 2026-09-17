@@ -139,8 +139,8 @@ onMounted(() => load({ initial: true }))
     </p>
     <p v-else-if="state === 'empty'" data-state="empty">
       No golden dataset yet. Import one (see
-      <code>scripts/seed-golden.py</code>) and create a saved configuration on
-      the Experiments page first.
+      <code>scripts/seed-golden.py</code>) and create a saved configuration in
+      Settings first.
     </p>
 
     <template v-else data-state="ready">

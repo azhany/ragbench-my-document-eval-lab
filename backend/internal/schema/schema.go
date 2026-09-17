@@ -14,7 +14,8 @@ import (
 
 // RequiredVersion is the highest migration version under db/migrations/ that
 // this binary is built against. It must be bumped whenever a migration is
-const RequiredVersion = 20
+// added.
+const RequiredVersion = 21
 
 // ErrNotMigrated reports that the migration tracking table is missing, which
 // means no migrations have been applied to this database.

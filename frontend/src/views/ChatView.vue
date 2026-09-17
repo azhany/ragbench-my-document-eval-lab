@@ -152,7 +152,7 @@ watch(() => route.query.trace, (id) => loadTrace(id), { immediate: true })
     <section v-else-if="state === 'empty-configs'" class="panel" data-state="empty-configs">
       <h3>No saved configurations</h3>
       <p>Create an immutable RAG configuration before asking a grounded question.</p>
-      <RouterLink to="/">Open Overview</RouterLink>
+      <RouterLink to="/settings">Open Settings</RouterLink>
     </section>
 
     <div v-else>

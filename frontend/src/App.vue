@@ -1,43 +1,36 @@
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import AppNav from './components/AppNav.vue'
+
+const route = useRoute()
+const today = new Intl.DateTimeFormat('en', {
+  month: 'short', day: 'numeric', year: 'numeric',
+}).format(new Date())
+const pageTitle = computed(() => route.meta.title || 'Overview')
 </script>
 
 <template>
-  <div class="shell">
-    <header class="site-header">
-      <h1>RAGbench-MY</h1>
-      <p class="subtitle">Document library evaluation lab</p>
-      <AppNav />
-    </header>
-    <main>
-      <RouterView />
-    </main>
-    <footer class="site-footer">
-      <a href="http://localhost:9090" target="_blank" rel="noreferrer">Airflow UI</a>
-      <a href="http://localhost:8080" target="_blank" rel="noreferrer">API</a>
-    </footer>
+  <div class="app-shell">
+    <AppNav />
+    <div class="app-workspace">
+      <header class="topbar">
+        <div class="topbar-context">
+          <span class="topbar-kicker">Workspace</span>
+          <strong>{{ pageTitle }}</strong>
+        </div>
+        <div class="topbar-meta">
+          <span>{{ today }}</span>
+          <span class="system-status"><span class="online-dot"></span> All systems operational</span>
+        </div>
+      </header>
+      <main class="page-content">
+        <RouterView />
+      </main>
+      <footer class="site-footer">
+        <span>RAGbench-MY · Document Library Eval Lab</span>
+        <span><a href="http://localhost:9090" target="_blank" rel="noreferrer">Airflow UI</a><a href="http://localhost:8080" target="_blank" rel="noreferrer">API</a></span>
+      </footer>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.shell {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 1.5rem 1rem 3rem;
-}
-.site-header h1 {
-  margin: 0;
-  font-size: 1.6rem;
-}
-.subtitle {
-  margin: 0.2rem 0 1rem;
-  color: var(--muted);
-}
-.site-footer {
-  margin-top: 2.5rem;
-  display: flex;
-  gap: 1.5rem;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-</style>

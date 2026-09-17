@@ -64,7 +64,7 @@ Current check set:
 
 ### `GET /`
 
-Service information: `{"service":"ragbench-api","status":"ok"}` plus the implemented resource roots, including `/api/v1/metrics/summary` and `/api/v1/regression-checks`.
+Service information: `{"service":"ragbench-api","status":"ok"}` plus the implemented resource roots, including `/api/v1/settings`, `/api/v1/metrics/summary`, and `/api/v1/regression-checks`.
 
 ## RAG configurations (implemented)
 
@@ -79,8 +79,9 @@ only on validation failures with one entry per offending field.
 
 ### `POST /api/v1/rag-configs`
 
-Creates one configuration. Request body (all fields required except
-`rerank_enabled`, which defaults to `false`):
+Creates one configuration. Request body (all core fields required except
+`rerank_enabled`, which defaults to `false`; fusion fields default to the
+persisted RRF values when omitted):
 
 ```json
 {
@@ -92,6 +93,10 @@ Creates one configuration. Request body (all fields required except
   "rerank_enabled": false,
   "reranker_profile": "lexical-v1",
   "rerank_candidate_limit": 20,
+  "fusion_method": "rrf",
+  "rrf_rank_constant": 60,
+  "fts_candidate_limit": 20,
+  "vector_candidate_limit": 20,
   "prompt_version": "v1",
   "model_profile": "openai-gpt-4o-mini",
   "embedding_profile": "openai-text-embedding-3-small"
@@ -109,11 +114,17 @@ Validation rules (explicit bounds, mirrored by database constraints in
 | `retrieval_mode` | `vector` or `hybrid` |
 | `top_k` | integer 1–100 |
 | `prompt_version` | must exist in the prompt registry (currently `v1`) |
-| `model_profile` | must exist in the model profile registry (`openai-gpt-4o-mini`, `opencode-go-glm-5.3-flash`, testing-only `opencode-zen-big-pickle`, fallback `opencode-zen-mimo-v2.5-free`, or `huggingface-gemma-3-4b-it-free`) |
-| `embedding_profile` | must exist in the embedding profile registry (`openai-text-embedding-3-small`, 1536d, or `huggingface-bge-small-en-v1.5`, 384d) |
+| `fusion_method` | `rrf` (defaults to `rrf`) |
+| `rrf_rank_constant` | number 1–1000 (defaults to 60) |
+| `fts_candidate_limit` / `vector_candidate_limit` | integer 1–100 (defaults to 20) |
+| `model_profile` | must be an enabled generation profile in the persisted Settings catalog |
+| `embedding_profile` | must be an enabled embedding profile in the persisted Settings catalog; its provider/model/dimensions are resolved and stored |
 
-The registry lives in `backend/internal/providers`; unknown profiles and
-prompt versions are rejected, never silently accepted.
+The catalog lives in PostgreSQL (`model_profiles`) and is managed through the
+Settings API. Provider adapters remain server-side code, so a profile may use
+any model ID supported by an existing adapter; adding a new wire protocol still
+requires backend work. Unknown profiles and prompt versions are rejected,
+never silently accepted.
 
 Response `201 Created` with `Location: /api/v1/rag-configs/{id}`:
 
@@ -126,8 +137,16 @@ Response `201 Created` with `Location: /api/v1/rag-configs/{id}`:
   "retrieval_mode": "vector",
   "top_k": 5,
   "rerank_enabled": false,
+  "reranker_profile": "lexical-v1",
+  "rerank_candidate_limit": 20,
+  "fusion_method": "rrf",
+  "rrf_rank_constant": 60,
+  "fts_candidate_limit": 20,
+  "vector_candidate_limit": 20,
   "prompt_version": "v1",
   "model_profile": "openai-gpt-4o-mini",
+  "model_provider": "openai",
+  "model_name": "gpt-4o-mini",
   "embedding_profile": "openai-text-embedding-3-small",
   "embedding_provider": "openai",
   "embedding_model": "text-embedding-3-small",
@@ -138,8 +157,10 @@ Response `201 Created` with `Location: /api/v1/rag-configs/{id}`:
 ```
 
 `embedding_provider`/`embedding_model`/`embedding_dimensions` are resolved
-server-side from the registry and persisted with the profile key, so the exact
-embedding identity used survives registry changes.
+server-side from the Settings catalog and persisted with the profile key, so
+the exact embedding identity used survives catalog changes. The concrete
+`model_provider`/`model_name` generation identity is persisted for the same
+reason.
 
 `unavailable_capabilities` lists requested features the running stack cannot
 execute. Hybrid retrieval is executable through persisted FTS+RRF settings;
@@ -154,6 +175,53 @@ Errors:
 | 400 | `validation_failed` | one or more field violations, detailed in `error.fields` |
 | 409 | `name_conflict` | a configuration with the same name already exists |
 | 405 | — | method not allowed for the path |
+
+### `GET /api/v1/settings`
+
+Returns the provider adapters, persisted model profiles, prompt versions,
+reranker profiles, and UI validation limits. It never returns provider keys,
+secret values, or environment contents.
+
+Response `200 OK`:
+
+```json
+{
+  "providers": [
+    {"id":"openai","label":"OpenAI","protocol":"OpenAI-compatible","roles":["generation","embedding"],"credential_note":"Server environment"}
+  ],
+  "model_profiles": [
+    {"id":"…","name":"openai-gpt-4o-mini","kind":"generation","provider":"openai","model":"gpt-4o-mini","dimensions":null,"enabled":true}
+  ],
+  "prompt_versions": ["v1"],
+  "reranker_profiles": ["lexical-v1"],
+  "limits": {"min_chunk_size":1,"max_chunk_size":8192,"min_top_k":1,"max_top_k":100}
+}
+```
+
+### `GET /api/v1/settings/model-profiles/{id}`
+
+Returns one persisted model profile, including disabled entries for Settings
+administration. Errors are `404 not_found` for an unknown or malformed id.
+
+### `POST /api/v1/settings/model-profiles`
+
+Adds a generation or embedding model identity to the persisted catalog. This
+endpoint accepts model metadata only; it deliberately rejects unknown fields,
+including credentials. The `name` is a lowercase profile key (`a-z`, numbers,
+`.`, `_`, `-`), and names are unique per kind.
+
+Request:
+
+```json
+{"name":"support-model-v1","kind":"generation","provider":"opencode-go","model":"glm-5.3-flash"}
+```
+
+Embedding profiles additionally require a positive `dimensions` value. The
+provider must have a matching existing adapter (`openai` or `huggingface` for
+embeddings; `openai`, `opencode-go`, `opencode-zen`, or `huggingface-chat` for
+generation). Response `201 Created` returns the persisted profile and its
+`Location`. Errors are `400 invalid_body`/`validation_failed`, `409
+name_conflict`, or `503 settings_unavailable` when the catalog is not wired.
 
 ### `GET /api/v1/rag-configs`
 

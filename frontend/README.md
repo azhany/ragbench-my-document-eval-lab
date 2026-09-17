@@ -1,13 +1,12 @@
 # Frontend
 
 Vue 3 + Vite single-page shell for the RAGbench-MY UI destinations:
-Overview, Library, Chat, Evaluations, Experiments, Monitor.
+Overview, Library, Chat, Evaluations, Experiments, Monitor, Settings.
 
 ## Structure
 
-- `src/router.js` — vue-router routes; destinations whose owning stories have
-  not landed render `ComingSoonView`, which states the owning stories and
-  never shows sample data or fake success states.
+- `src/router.js` — vue-router routes for the current workspace plus the
+  Settings destination.
 - `src/api/client.js` — the single API client shared by the whole shell. It
   normalizes every failure to `{ kind, status, code, message, fields, payload }`
   (`kind: 'unreachable'` for network failures, `kind: 'http'` for non-2xx
@@ -16,6 +15,9 @@ Overview, Library, Chat, Evaluations, Experiments, Monitor.
   RAG configuration list.
 - `src/components/ConfigList.vue` — config list with distinct loading, empty,
   error (retryable), and ready states.
+- `src/views/SettingsView.vue` — settings-managed model profiles and the
+  immutable RAG configuration builder. It sends metadata only; credentials
+  remain in the backend environment.
 - State is component-local; no Pinia store — add one only when state is
   genuinely shared across views.
 
@@ -23,7 +25,7 @@ Overview, Library, Chat, Evaluations, Experiments, Monitor.
 
 ```sh
 npm install
-npm test        # vitest: client, config list, router
+npm test        # vitest: client, views, Settings, config list, router
 npm run dev     # dev server; /api, /healthz, /readyz proxy to localhost:8080
 npm run build   # production bundle into dist/
 ```

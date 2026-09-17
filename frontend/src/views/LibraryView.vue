@@ -117,7 +117,7 @@ onUnmounted(() => { disposed = true; clearTimeout(timer) })
           @change="file = $event.target.files[0] ?? null" />
       </label>
       <button type="submit" :disabled="busy || !file || !configID">{{ busy ? 'Working…' : 'Upload document' }}</button>
-      <p v-if="state !== 'loading' && !configs.length" class="muted">No saved configurations available. See Overview for configuration setup.</p>
+      <p v-if="state !== 'loading' && !configs.length" class="muted">No saved configurations available. Open Settings to create one.</p>
       <p class="muted">The selected configuration also applies to reprocessing. Text-bearing files only; OCR is unavailable.</p>
     </form>
 

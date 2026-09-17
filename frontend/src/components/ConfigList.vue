@@ -30,7 +30,7 @@ function formatDateTime(value) {
 </script>
 
 <template>
-  <section>
+  <section class="config-list">
     <div class="section-head">
       <h2>Saved RAG configurations</h2>
       <button v-if="state === 'error' || state === 'ready'" type="button" @click="refresh">
@@ -51,9 +51,9 @@ function formatDateTime(value) {
     </div>
 
     <p v-else-if="state === 'empty'" class="status" data-state="empty">
-      No configurations saved yet. Create one with
-      <code>POST /api/v1/rag-configs</code> — see <code>docs/API.md</code> for the
-      request shape.
+      No configurations saved yet. Open <code>Settings</code> to create one
+      through the UI, or use <code>POST /api/v1/rag-configs</code> for the
+      documented API contract.
     </p>
 
     <table v-else data-state="ready">
@@ -64,7 +64,7 @@ function formatDateTime(value) {
           <th>Retrieval</th>
           <th>Top-k</th>
           <th>Prompt</th>
-          <th>Model profile</th>
+          <th>Generation model</th>
           <th>Embedding</th>
           <th>Created</th>
           <th>Notes</th>
@@ -80,7 +80,7 @@ function formatDateTime(value) {
           </td>
           <td>{{ cfg.top_k }}</td>
           <td>{{ cfg.prompt_version }}</td>
-          <td><code>{{ cfg.model_profile }}</code></td>
+          <td><code>{{ cfg.model_profile }}</code><span v-if="cfg.model_provider" class="dim"> · {{ cfg.model_provider }}/{{ cfg.model_name }}</span></td>
           <td>
             <code>{{ cfg.embedding_profile }}</code>
             <span class="dim"> ({{ cfg.embedding_dimensions }}d)</span>
@@ -104,9 +104,8 @@ function formatDateTime(value) {
 </template>
 
 <style scoped>
-h2 {
-  margin: 1.5rem 0 0.75rem;
-}
+.config-list { display: grid; gap: 12px; }
+h2 { margin: 0; font-size: 16px; }
 .section-head {
   display: flex;
   align-items: center;

@@ -110,16 +110,35 @@ creates a new configuration identity under a new name (migration
 - top_k: 1–100
 - rerank_enabled
 - reranker_profile (`lexical-v1` when enabled), rerank_candidate_limit 1–100
+- fusion_method (`rrf`), rrf_rank_constant, fts_candidate_limit, and
+  vector_candidate_limit: persisted hybrid retrieval constants
 - prompt_version: registry-governed (`backend/internal/providers`, currently `v1`)
-- model_profile: registry-governed (`openai-gpt-4o-mini`,
-  `opencode-go-glm-5.3-flash`, testing-only `opencode-zen-big-pickle`, or
-  fallback `opencode-zen-mimo-v2.5-free`, or `huggingface-gemma-3-4b-it-free`)
-- embedding_profile: registry-governed key (`openai-text-embedding-3-small` or
-  `huggingface-bge-small-en-v1.5`)
+- model_profile: enabled generation profile key from `model_profiles`
+- model_provider, model_name: concrete generation identity resolved and copied
+  at creation time so catalog edits cannot rewrite historical runs
+- embedding_profile: enabled embedding profile key from `model_profiles`
 - embedding_provider, embedding_model, embedding_dimensions: resolved identity
-  persisted at creation so the exact embedding identity survives registry
+  persisted at creation so the exact embedding identity survives catalog
   changes; must stay compatible with `index_revisions`
 - created_at
+
+### model_profiles (`0021`, Sprint 8)
+Settings-managed provider/model identities. This table contains no API keys,
+base URLs, or other secrets; those remain server-side environment/runtime
+configuration.
+
+- id UUID PK
+- name: lowercase profile key, unique with kind
+- kind: `generation` | `embedding`
+- provider: one of the existing server-side provider adapters
+- model: provider model identifier
+- dimensions: positive for embeddings, NULL for generation profiles
+- enabled, created_at, updated_at
+
+RAG config creation resolves enabled profiles and copies concrete identities.
+If an operator changes profile availability or metadata administratively, that
+affects future configurations only; historical traces retain the configuration
+snapshot that produced them.
 
 ### document_analyses / document_analysis_spans (`0020`, RB-27–RB-31)
 

@@ -95,15 +95,15 @@ def validate_vectors(vectors, count, dimensions):
             raise IngestionError("embedding_failed", "Provider returned a zero vector, unusable for cosine search")
 
 
-SUPPORTED_PROFILES = {
-    ("openai", "text-embedding-3-small", 1536),
-    ("huggingface", "BAAI/bge-small-en-v1.5", 384),
-}
+# Model names and dimensions come from the persisted Settings catalog. The
+# worker still constrains the provider adapter because arbitrary wire
+# protocols/credentials cannot be introduced by a browser request.
+SUPPORTED_EMBEDDING_PROVIDERS = {"openai", "huggingface"}
 
 
 def embed_chunks(chunks, provider, model, dimensions, embedder=None, batch_size=16):
-    if (provider, model, dimensions) not in SUPPORTED_PROFILES:
-        raise IngestionError("embedding_failed", "Persisted embedding profile is incompatible with this index")
+    if provider not in SUPPORTED_EMBEDDING_PROVIDERS or not model or not isinstance(dimensions, int) or dimensions < 1:
+        raise IngestionError("embedding_failed", "Persisted embedding provider/model/dimensions are incompatible with this index")
     if not 1 <= batch_size <= 128:
         raise IngestionError("embedding_failed", "EMBEDDING_BATCH_SIZE must be between 1 and 128")
     embedder = embedder or runtime_embedder(provider)

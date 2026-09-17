@@ -5,9 +5,10 @@ import ChatView from './views/ChatView.vue'
 import EvaluationsView from './views/EvaluationsView.vue'
 import ExperimentsView from './views/ExperimentsView.vue'
 import MonitorView from './views/MonitorView.vue'
-// Destinations whose owning stories have not landed yet route to
-// ComingSoonView, which states the owning stories explicitly and renders no
-// sample data or fake metrics.
+import SettingsView from './views/SettingsView.vue'
+// Keep the current workspace sitemap explicit; each destination owns its
+// loading, empty, failure, or live-data state rather than relying on shell
+// placeholders.
 const routes = [
   {
     path: '/',
@@ -44,6 +45,12 @@ const routes = [
     name: 'monitor',
     component: MonitorView,
     meta: { title: 'Monitor', story: 'RB-21–RB-24 (Sprint 6)' },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: SettingsView,
+    meta: { title: 'Settings', story: 'RB-33–RB-35 (Sprint 8)' },
   },
 ]
 

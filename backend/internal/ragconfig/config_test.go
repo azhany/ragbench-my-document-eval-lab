@@ -1,10 +1,23 @@
 package ragconfig
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"ragbench-my/backend/internal/providers"
 )
+
+type settingsProfileResolver struct{}
+
+func (settingsProfileResolver) GenerationProfile(context.Context, string) (providers.GenerationProfile, error) {
+	return providers.GenerationProfile{Name: "support-model-v2", Provider: "opencode-go", Model: "custom-model-id"}, nil
+}
+
+func (settingsProfileResolver) EmbeddingProfile(context.Context, string) (providers.EmbeddingProfile, error) {
+	return providers.EmbeddingProfile{Name: "support-embedding-v2", Provider: "openai", Model: "text-embedding-3-large", Dimensions: 3072}, nil
+}
 
 func validRequest() CreateRequest {
 	return CreateRequest{
@@ -57,6 +70,21 @@ func TestResolveAcceptsHuggingFaceEmbeddingAndOpenAICompatibleGeneration(t *test
 		resolved.EmbeddingModel != "BAAI/bge-small-en-v1.5" ||
 		resolved.EmbeddingDimensions != 384 {
 		t.Fatalf("Hugging Face identity not resolved: %+v", resolved)
+	}
+}
+
+func TestResolveWithProfilesAcceptsSettingsCatalogIdentities(t *testing.T) {
+	req := validRequest()
+	req.ModelProfile = "support-model-v2"
+	req.EmbeddingProfile = "support-embedding-v2"
+	resolved, errs := ResolveWithProfiles(context.Background(), req, settingsProfileResolver{})
+	if len(errs) != 0 {
+		t.Fatalf("ResolveWithProfiles() returned validation errors: %v", errs)
+	}
+	if resolved.ModelProvider != "opencode-go" || resolved.ModelName != "custom-model-id" ||
+		resolved.EmbeddingProvider != "openai" || resolved.EmbeddingModel != "text-embedding-3-large" ||
+		resolved.EmbeddingDimensions != 3072 {
+		t.Fatalf("Settings identities were not resolved: %+v", resolved)
 	}
 }
 

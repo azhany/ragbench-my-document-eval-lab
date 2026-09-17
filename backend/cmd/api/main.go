@@ -21,6 +21,7 @@ import (
 	"ragbench-my/backend/internal/health"
 	"ragbench-my/backend/internal/httpapi"
 	"ragbench-my/backend/internal/metrics"
+	"ragbench-my/backend/internal/modelprofile"
 	"ragbench-my/backend/internal/providers"
 	"ragbench-my/backend/internal/rag"
 	"ragbench-my/backend/internal/ragconfig"
@@ -68,7 +69,8 @@ func run(logger *slog.Logger) error {
 	if err := os.MkdirAll(cfg.UploadDir, 0750); err != nil {
 		return fmt.Errorf("prepare upload directory: %w", err)
 	}
-	configStore := ragconfig.NewStore(pool)
+	profileStore := modelprofile.NewStore(pool)
+	configStore := ragconfig.NewStoreWithProfiles(pool, profileStore)
 	traceStore := trace.NewStore(pool)
 	providerRouter := &providers.Router{
 		Embedders: map[string]providers.Embedder{
@@ -121,6 +123,7 @@ func run(logger *slog.Logger) error {
 			Runs:         runStore,
 			Experiments:  experimentStore,
 			Orchestrator: orchestrator,
+			Profiles:     profileStore,
 			Dispatcher:   evalrun.NewAirflowDispatcher(cfg.AirflowURL, cfg.AirflowUsername, cfg.AirflowPassword),
 			Executor: &evalrun.Executor{
 				Store: runStore, Datasets: datasetStore,

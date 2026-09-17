@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createAppRouter } from './router'
 
 describe('router', () => {
-  it('exposes all six navigation destinations', async () => {
+  it('exposes the current sitemap plus Settings', async () => {
     const router = createAppRouter()
 
     const destinations = [
@@ -12,6 +12,7 @@ describe('router', () => {
       { path: '/evaluations', title: 'Evaluations', story: 'RB-13–RB-16 (Sprint 4)' },
       { path: '/experiments', title: 'Experiments', story: 'RB-17–RB-20 (Sprint 5)' },
       { path: '/monitor', title: 'Monitor', story: 'RB-21–RB-24 (Sprint 6)' },
+      { path: '/settings', title: 'Settings', story: 'RB-33–RB-35 (Sprint 8)' },
     ]
 
     for (const dest of destinations) {
@@ -25,7 +26,7 @@ describe('router', () => {
     }
   })
 
-  it('routes unimplemented destinations to the explicit ComingSoon view', async () => {
+  it('keeps the current destination components distinct', async () => {
     const router = createAppRouter()
     await router.push('/chat')
     await router.isReady()

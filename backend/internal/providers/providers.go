@@ -1,11 +1,9 @@
 // Package providers defines the small integration surfaces for embedding and
-// generation providers plus the immutable registry of prompt versions and
-// model profiles. Profiles are identifiers only — credentials never live here.
-//
-// The registry is the explicit source of truth: configurations referencing a
-// name that is not registered fail validation instead of being silently
-// accepted. Adding a profile or prompt version is a deliberate code change,
-// so every stored configuration keeps a resolvable identity.
+// generation providers plus the immutable registry of prompt, rubric, and
+// compatibility identities. Profiles selected by RAG configurations are
+// persisted by modelprofile; the legacy model entries below remain available
+// to document-intelligence/default compatibility callers. Credentials never
+// live in either registry or database.
 package providers
 
 import (
@@ -13,8 +11,8 @@ import (
 )
 
 // EmbeddingProfile identifies one embedding provider/model/dimensions
-// combination. Registered dimensions must have a companion ANN index in the
-// latest database migration; publication enforces the persisted dimensions.
+// combination. Persisted Settings profiles use the same shape; publication
+// enforces the persisted dimensions.
 type EmbeddingProfile struct {
 	Name       string
 	Provider   string

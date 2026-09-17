@@ -48,19 +48,20 @@ PDF/JPG/PNG
 
 The implementation intentionally reuses the repository's production-minded foundations instead of creating a separate demo service: durable PostgreSQL state, explicit migrations, Go domain logic/provider interfaces, Airflow batch orchestration, structured errors, trace/cost conventions, Docker Compose, and repeatable tests.
 
-Sprint 7 is an extension of the six-sprint RAG evaluation lab, not a second application. Retrieval over historical invoices or receipts is optional; mandatory extraction and validation operate on the uploaded document evidence.
+Sprint 7 is an extension of the six-sprint RAG evaluation lab, not a second application. Sprint 8 adds the Settings-managed model catalog and RAG configuration UI without changing the existing workspace sitemap. Retrieval over historical invoices or receipts is optional; mandatory extraction and validation operate on the uploaded document evidence.
 
 ### Reviewer guide
 
 1. Start the stack using the normal [local-development instructions](#local-development).
 2. Apply pending database migrations.
 3. Configure the documented model/OCR provider credentials in the uncommitted `.env` file.
-4. Create a saved RAG configuration, upload a synthetic PDF/JPG/PNG, and start an analysis using the documented assessment endpoint.
-5. Poll/read the analysis until the workflow completes or exposes a classified failure.
-6. Inspect structured data, validation findings, summary, and trace/usage metadata.
-7. See [`docs/ASSESSMENT_MAPPING.md`](docs/ASSESSMENT_MAPPING.md) for requirement-to-evidence coverage.
-8. See [`docs/SPRINT_7_VERIFICATION.md`](docs/SPRINT_7_VERIFICATION.md) for the verified runtime/test evidence.
-9. See [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md) for architecture decisions, prompt strategy, limitations, guardrails, and production improvements.
+4. Open `http://localhost:5173/settings` to add/select model profiles and save a RAG configuration. The API contract remains available for automation.
+5. Upload a synthetic PDF/JPG/PNG, and start an analysis using the documented assessment endpoint.
+6. Poll/read the analysis until the workflow completes or exposes a classified failure.
+7. Inspect structured data, validation findings, summary, and trace/usage metadata.
+8. See [`docs/ASSESSMENT_MAPPING.md`](docs/ASSESSMENT_MAPPING.md) for requirement-to-evidence coverage.
+9. See [`docs/SPRINT_7_VERIFICATION.md`](docs/SPRINT_7_VERIFICATION.md) and [`docs/SPRINT_8_VERIFICATION.md`](docs/SPRINT_8_VERIFICATION.md) for the verified runtime/test evidence.
+10. See [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md) for architecture decisions, prompt strategy, limitations, guardrails, and production improvements.
 
 The assessment path intentionally uses synthetic fixture content only. A minimal
 reviewer flow is:
@@ -241,8 +242,8 @@ Select it in Library and upload a text-bearing PDF, DOCX, or UTF-8 TXT.
 Library refreshes every five seconds while documents are listed and exposes the actual error, published chunk count,
 revision history, reprocessing, dispatch recovery, and deletion.
 
-Choose a registered provider profile and set its credential in `.env`, then
-recreate the backend and Airflow services. OpenAI uses `OPENAI_API_KEY` (or the
+Choose a model profile in Settings and set its provider credential in `.env`,
+then recreate the backend and Airflow services. OpenAI uses `OPENAI_API_KEY` (or the
 embedding-only `EMBEDDING_PROVIDER_API_KEY`); native Hugging Face feature
 extraction uses `HF_TOKEN`/`HUGGINGFACE_API_KEY`; OpenCode Go generation uses
 `OPENCODE_API_KEY`/`GENERATION_PROVIDER_API_KEY`. The existing generic
@@ -263,9 +264,10 @@ JWT/v2 API using the existing local admin credentials; keys never reach Vue.
 | `OPENAI_COMPATIBLE_BASE_URL` | `https://opencode.ai/zen/go/v1` | OpenAI-compatible Chat Completions base (OpenCode Go by default) |
 | `UPLOAD_DIR` | `/data/uploads` | Same shared path in Go and Airflow |
 
-Executable provider profiles are `openai-text-embedding-3-small` (1536d),
-`huggingface-bge-small-en-v1.5` (384d), `openai-gpt-4o-mini`, and
-`opencode-go-glm-5.3-flash`. For a complete non-OpenAI provider smoke:
+The migration seeds OpenAI, OpenCode Go, OpenCode Zen, and Hugging Face
+generation profiles plus OpenAI and Hugging Face embedding profiles. Their
+profile names and model IDs are selectable in Settings; new model IDs behind
+the existing adapters can be added there. For a complete non-OpenAI provider smoke:
 
 ```sh
 SMOKE_EMBEDDING_PROFILE=huggingface-bge-small-en-v1.5 \
@@ -273,8 +275,12 @@ SMOKE_MODEL_PROFILE=opencode-go-glm-5.3-flash \
   sh scripts/smoke-documents.sh --chat
 ```
 
-The upload volume uses shared group 0 and setgid directory permissions; Go
-remains UID 10001 and Airflow UID 50000. Backend startup waits for volume setup.
+The shipped model catalog is seeded by migration `0021_settings_model_profiles.sql`
+and can be extended from Settings without a code change. Settings stores provider,
+model, and embedding dimensions only; API keys and endpoint credentials remain
+server-side process configuration and never reach Vue. The upload volume uses
+shared group 0 and setgid directory permissions; Go remains UID 10001 and
+Airflow UID 50000. Backend startup waits for volume setup.
 Deletion retains historical evidence and excludes the document from new
 searches; it does not erase bytes. Failure and recovery contracts are in
 `docs/API.md`, and verification commands/remaining gates are in `docs/TEST_PLAN.md`.

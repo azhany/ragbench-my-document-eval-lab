@@ -53,16 +53,20 @@ type Matrix struct {
 // immutable configuration payload (defaults inherited from the base config,
 // overrides applied). Persisted before execution.
 type CombinationSetting struct {
-	ChunkSize            int    `json:"chunk_size"`
-	ChunkOverlap         int    `json:"chunk_overlap"`
-	TopK                 int    `json:"top_k"`
-	RetrievalMode        string `json:"retrieval_mode"`
-	PromptVersion        string `json:"prompt_version"`
-	ModelProfile         string `json:"model_profile"`
-	EmbeddingProfile     string `json:"embedding_profile"`
-	RerankEnabled        bool   `json:"rerank_enabled"`
-	RerankerProfile      string `json:"reranker_profile"`
-	RerankCandidateLimit int    `json:"rerank_candidate_limit"`
+	ChunkSize            int     `json:"chunk_size"`
+	ChunkOverlap         int     `json:"chunk_overlap"`
+	TopK                 int     `json:"top_k"`
+	RetrievalMode        string  `json:"retrieval_mode"`
+	PromptVersion        string  `json:"prompt_version"`
+	ModelProfile         string  `json:"model_profile"`
+	EmbeddingProfile     string  `json:"embedding_profile"`
+	RerankEnabled        bool    `json:"rerank_enabled"`
+	RerankerProfile      string  `json:"reranker_profile"`
+	RerankCandidateLimit int     `json:"rerank_candidate_limit"`
+	FusionMethod         string  `json:"fusion_method"`
+	RRFConstant          float64 `json:"rrf_rank_constant"`
+	FTSCandidateLimit    int     `json:"fts_candidate_limit"`
+	VectorCandidateLimit int     `json:"vector_candidate_limit"`
 }
 
 // Expand produces the cartesian product in deterministic order: every
@@ -110,6 +114,10 @@ func Expand(base ragconfig.Config, m Matrix) ([]CombinationSetting, error) {
 											EmbeddingProfile: base.EmbeddingProfile,
 											RerankEnabled:    rerank, RerankerProfile: rerankerProfile,
 											RerankCandidateLimit: rerankLimit,
+											FusionMethod:         base.FusionMethod,
+											RRFConstant:          base.RRFConstant,
+											FTSCandidateLimit:    base.FTSCandidateLimit,
+											VectorCandidateLimit: base.VectorCandidateLimit,
 										})
 									}
 								}
@@ -172,6 +180,10 @@ func (c CombinationSetting) configRequest(name string) ragconfig.CreateRequest {
 		RerankEnabled:        c.RerankEnabled,
 		RerankerProfile:      c.RerankerProfile,
 		RerankCandidateLimit: c.RerankCandidateLimit,
+		FusionMethod:         c.FusionMethod,
+		RRFConstant:          c.RRFConstant,
+		FTSCandidateLimit:    c.FTSCandidateLimit,
+		VectorCandidateLimit: c.VectorCandidateLimit,
 	}
 }
 

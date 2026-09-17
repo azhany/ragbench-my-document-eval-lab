@@ -277,7 +277,7 @@ onMounted(() => load({ initial: true }))
       Cannot reach the API: {{ errorOf(loadError) }}
     </p>
     <p v-else-if="state === 'empty'">
-      Create a saved RAG configuration first (see Chat), then come back to
+      Create a saved RAG configuration first (see Settings), then come back to
       experiment.
     </p>
 

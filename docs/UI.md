@@ -8,6 +8,12 @@
 - Evaluations
 - Experiments
 - Monitor
+- Settings
+
+Infrastructure links:
+
+- Pipelines (Airflow)
+- Models (Settings catalog)
 
 ## MVP screens
 
@@ -50,6 +56,14 @@ reopened after reprocess/delete without changing the evidence displayed.
 - token/cost trend
 - recent traces
 - recent failures
+
+### Settings (Sprint 8)
+- create immutable RAG configurations without shell/API-only setup
+- configure chunking, vector/hybrid retrieval, RRF, reranking, prompt, and
+  model/embedding profile selection
+- add model IDs to a persisted provider-profile catalog
+- show provider adapter capabilities while keeping `.env` credentials on the
+  server
 
 ## UX principle
 

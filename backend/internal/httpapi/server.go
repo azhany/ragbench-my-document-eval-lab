@@ -29,6 +29,7 @@ type server struct {
 	executor     *evalrun.Executor
 	metrics      MetricsStore
 	regressions  RegressionStore
+	profiles     ModelProfileStore
 	analysis     AnalysisOptions
 }
 
@@ -62,6 +63,9 @@ type EvalOptions struct {
 	Executor    *evalrun.Executor
 	Metrics     MetricsStore
 	Regressions RegressionStore
+	// Profiles is the persisted Settings catalog used by RAG configuration
+	// creation. It is optional so the smaller test constructors remain useful.
+	Profiles ModelProfileStore
 }
 
 func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chatPipeline *rag.Pipeline, traces TracesStore, eval EvalOptions, readinessChecks ...health.NamedCheck) http.Handler {
@@ -75,6 +79,9 @@ func newAPI(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, chat
 	mux.HandleFunc("POST /api/v1/rag-configs", s.createConfig)
 	mux.HandleFunc("GET /api/v1/rag-configs", s.listConfigs)
 	mux.HandleFunc("GET /api/v1/rag-configs/{id}", s.getConfig)
+	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
+	mux.HandleFunc("GET /api/v1/settings/model-profiles/{id}", s.getModelProfile)
+	mux.HandleFunc("POST /api/v1/settings/model-profiles", s.createModelProfile)
 	if chatPipeline != nil {
 		mux.HandleFunc("POST /api/v1/chat", s.chat)
 		if traces != nil {
@@ -141,6 +148,7 @@ func newServer(logger *slog.Logger, configs ConfigStore, opts DocumentOptions, c
 		logger: logger, configs: configs, documents: opts, chatPipeline: chatPipeline, traces: traces,
 		datasets: eval.Datasets, runs: eval.Runs, experiments: eval.Experiments,
 		orchestrator: eval.Orchestrator, dispatcher: eval.Dispatcher, executor: eval.Executor, metrics: eval.Metrics, regressions: eval.Regressions,
+		profiles: eval.Profiles,
 		analysis: AnalysisOptions{Store: opts.AnalysisStore, Dispatcher: opts.AnalysisDispatcher, Runner: opts.AnalysisRunner},
 	}
 }
@@ -155,7 +163,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, serviceInfo{
 		Service:   ServiceName,
 		Status:    "ok",
-		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/documents", "/api/v1/document-analyses", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments", "/api/v1/metrics/summary", "/api/v1/regression-checks"},
+		Resources: []string{"/healthz", "/readyz", "/api/v1/rag-configs", "/api/v1/settings", "/api/v1/settings/model-profiles", "/api/v1/documents", "/api/v1/document-analyses", "/api/v1/chat", "/api/v1/traces", "/api/v1/eval-datasets", "/api/v1/eval-runs", "/api/v1/experiments", "/api/v1/metrics/summary", "/api/v1/regression-checks"},
 	})
 }
 

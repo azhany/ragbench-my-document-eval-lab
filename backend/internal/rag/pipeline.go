@@ -352,7 +352,17 @@ func (p *Pipeline) run(ctx context.Context, req ChatRequest, requestType string)
 	promptSnapshotJSON, _ = json.Marshal(snapshotPrompt(cfg, promptText, selected))
 
 	// Generation stage under its own deadline.
-	genProfile, genProfileErr := providers.GenerationProfileByName(cfg.ModelProfile)
+	genProfile := providers.GenerationProfile{
+		Name: cfg.ModelProfile, Provider: cfg.ModelProvider, Model: cfg.ModelName,
+	}
+	var genProfileErr error
+	// Configs created before the Settings catalog migration (and lightweight
+	// in-memory test configs) do not have the concrete columns. Keep their
+	// explicit legacy registry identity working while making persisted settings
+	// the normal runtime path.
+	if genProfile.Provider == "" || genProfile.Model == "" {
+		genProfile, genProfileErr = providers.GenerationProfileByName(cfg.ModelProfile)
+	}
 	generationProfile = genProfile
 	if genProfileErr != nil {
 		return fail(newError(ErrCodeCapabilityUnavailable, "%v", genProfileErr),

@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"ragbench-my/backend/internal/modelprofile"
 )
 
 // uniqueViolation is the PostgreSQL SQLSTATE for unique constraint violations
@@ -18,20 +20,34 @@ const uniqueViolation = "23505"
 
 // Store persists rag configurations in PostgreSQL.
 type Store struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	profiles ProfileResolver
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store {
+	return NewStoreWithProfiles(pool, modelprofile.NewStore(pool))
+}
+
+func NewStoreWithProfiles(pool *pgxpool.Pool, profiles ProfileResolver) *Store {
+	return &Store{pool: pool, profiles: profiles}
+}
 
 const configColumns = `id, name, chunk_size, chunk_overlap, retrieval_mode, top_k,
 	rerank_enabled, fusion_method, rrf_rank_constant, fts_candidate_limit,
 	vector_candidate_limit, reranker_profile, rerank_candidate_limit,
-	prompt_version, model_profile, embedding_profile,
+	prompt_version, model_profile, model_provider, model_name, embedding_profile,
 	embedding_provider, embedding_model, embedding_dimensions, created_at`
+
+// Validate exposes the same persisted-profile validation used by Create. The
+// experiment planner calls it before storing a matrix so UI-created profiles
+// are accepted there as well as in the direct Settings flow.
+func (s *Store) Validate(ctx context.Context, req CreateRequest) (Resolved, ValidationErrors) {
+	return ResolveWithProfiles(ctx, req, s.profiles)
+}
 
 // Create validates the request and inserts one immutable configuration.
 func (s *Store) Create(ctx context.Context, req CreateRequest) (Config, error) {
-	resolved, verrs := Resolve(req)
+	resolved, verrs := s.Validate(ctx, req)
 	if len(verrs) > 0 {
 		return Config{}, verrs
 	}
@@ -39,14 +55,16 @@ func (s *Store) Create(ctx context.Context, req CreateRequest) (Config, error) {
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO rag_configs (
 			name, chunk_size, chunk_overlap, retrieval_mode, top_k, rerank_enabled,
-			reranker_profile, rerank_candidate_limit,
-			prompt_version, model_profile, embedding_profile,
+			reranker_profile, rerank_candidate_limit, fusion_method, rrf_rank_constant,
+			fts_candidate_limit, vector_candidate_limit,
+			prompt_version, model_profile, model_provider, model_name, embedding_profile,
 			embedding_provider, embedding_model, embedding_dimensions
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING id, created_at`,
 		resolved.Name, resolved.ChunkSize, resolved.ChunkOverlap, resolved.RetrievalMode,
 		resolved.TopK, resolved.RerankEnabled, resolved.RerankerProfile, resolved.RerankCandidateLimit,
-		resolved.PromptVersion, resolved.ModelProfile,
+		resolved.FusionMethod, resolved.RRFConstant, resolved.FTSCandidateLimit, resolved.VectorCandidateLimit,
+		resolved.PromptVersion, resolved.ModelProfile, resolved.ModelProvider, resolved.ModelName,
 		resolved.EmbeddingProfile, resolved.EmbeddingProvider, resolved.EmbeddingModel,
 		resolved.EmbeddingDimensions,
 	)
@@ -60,8 +78,14 @@ func (s *Store) Create(ctx context.Context, req CreateRequest) (Config, error) {
 		RerankEnabled:        resolved.RerankEnabled,
 		RerankerProfile:      resolved.RerankerProfile,
 		RerankCandidateLimit: resolved.RerankCandidateLimit,
+		FusionMethod:         resolved.FusionMethod,
+		RRFConstant:          resolved.RRFConstant,
+		FTSCandidateLimit:    resolved.FTSCandidateLimit,
+		VectorCandidateLimit: resolved.VectorCandidateLimit,
 		PromptVersion:        resolved.PromptVersion,
 		ModelProfile:         resolved.ModelProfile,
+		ModelProvider:        resolved.ModelProvider,
+		ModelName:            resolved.ModelName,
 		EmbeddingProfile:     resolved.EmbeddingProfile,
 		EmbeddingProvider:    resolved.EmbeddingProvider,
 		EmbeddingModel:       resolved.EmbeddingModel,
@@ -147,6 +171,7 @@ func scanConfig(row scanner) (Config, error) {
 		&cfg.FTSCandidateLimit, &cfg.VectorCandidateLimit,
 		&cfg.RerankerProfile, &cfg.RerankCandidateLimit,
 		&cfg.PromptVersion, &cfg.ModelProfile,
+		&cfg.ModelProvider, &cfg.ModelName,
 		&cfg.EmbeddingProfile, &cfg.EmbeddingProvider, &cfg.EmbeddingModel,
 		&cfg.EmbeddingDimensions, &cfg.CreatedAt,
 	); err != nil {

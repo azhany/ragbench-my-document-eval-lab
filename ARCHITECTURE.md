@@ -12,7 +12,8 @@ PostgreSQL is authoritative for durable state.
                          ┌────────────────────┐
                          │      Vue.js UI     │
                          │ Library / Chat /   │
-                         │ Eval / Monitor     │
+                         │ Eval / Monitor /   │
+                         │ Settings           │
                          └─────────┬──────────┘
                                    │ HTTP/JSON
                          ┌─────────▼──────────┐
@@ -28,6 +29,7 @@ PostgreSQL is authoritative for durable state.
                     ┌───────────▼─┐ ┌─▼────────────────┐
                     │ PostgreSQL │ │ Apache Airflow    │
                     │ + pgvector │ │ ingest/eval DAGs │
+                    │ + settings │ │                 │
                     └──────┬─────┘ └───────┬──────────┘
                            │               │
                            │               ├─ extract
@@ -37,9 +39,19 @@ PostgreSQL is authoritative for durable state.
                            │
                     ┌──────▼─────────────────┐
                     │ Model / Embedding APIs │
-                    │ provider abstraction   │
+                    │ provider adapters      │
                     └────────────────────────┘
 ```
+
+## Settings and configuration path
+
+The Settings UI reads provider-adapter metadata and the PostgreSQL
+`model_profiles` catalog through the Go API. It writes model identities only;
+provider keys, endpoints, and other secrets stay in server-side runtime
+configuration. Saving a RAG configuration resolves the selected generation and
+embedding profiles and snapshots their concrete provider/model identity into
+the immutable `rag_configs` row before Library, Chat, Evaluations, or
+Experiments can use it.
 
 ## Query path
 
